@@ -139,7 +139,7 @@ class DeviceLibreNMSOverviewView(generic.ObjectView):
         if allow_unauth_graphs:
             graph_base_url = f"{client.base_url}/graph.php?device={device_id}"
         else:
-            graph_base_url = reverse('plugins-api:netbox_librenms-api:device_graph_proxy', kwargs={'pk': instance.pk})
+            graph_base_url = reverse('plugins-api:librenms-api:device_graph_proxy', kwargs={'pk': instance.pk})
 
         return {
             'active_tab': 'librenms-overview',
