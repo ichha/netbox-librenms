@@ -1,4 +1,8 @@
-from extras.plugins import PluginConfig
+try:
+    from netbox.plugins import PluginConfig
+except ImportError:
+    from extras.plugins import PluginConfig
+
 
 class NetBoxLibreNMSConfig(PluginConfig):
     name = 'netbox_librenms'
