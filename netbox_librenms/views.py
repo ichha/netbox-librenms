@@ -297,6 +297,18 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
             if pid:
                 port_id_map[str(pid)] = p
         
+        # Fetch all devices from LibreNMS to build a map of device_id -> hostname/ip/hardware
+        device_map = {}
+        try:
+            devices_res = client._request('GET', 'devices')
+            if devices_res.get('status') == 'ok' and devices_res.get('devices'):
+                for dev in devices_res['devices']:
+                    did = dev.get('device_id')
+                    if did:
+                        device_map[str(did)] = dev
+        except Exception:
+            pass
+
         # Fetch all links from LibreNMS
         all_links = client.get_links()
         
@@ -325,8 +337,17 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                 remote_name = link.get('remote_hostname') or link.get('remote_device_name') or f"Device ID {link.get('remote_device_id')}"
                 remote_port = link.get('remote_port') or 'Unknown'
                 
+                remote_dev_id = str(link.get('remote_device_id') or '')
+                remote_ip = ''
+                remote_platform = link.get('remote_platform') or ''
+                
+                if remote_dev_id in device_map:
+                    remote_ip = device_map[remote_dev_id].get('hostname') or device_map[remote_dev_id].get('ip') or ''
+                    if not remote_platform:
+                        remote_platform = device_map[remote_dev_id].get('hardware') or ''
+                
                 # Check if this neighbor exists inside NetBox
-                nb_device = find_netbox_device_by_name_or_ip(remote_name)
+                nb_device = find_netbox_device_by_name_or_ip(remote_name, remote_ip)
                 nb_url = None
                 if nb_device:
                     nb_url = reverse('dcim:device', kwargs={'pk': nb_device.pk})
@@ -352,6 +373,8 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                     'local_admin_status': admin_status,
                     'local_oper_status': oper_status,
                     'remote_device_name': remote_name,
+                    'remote_device_ip': remote_ip,
+                    'remote_platform': remote_platform,
                     'remote_port': remote_port,
                     'netbox_url': nb_url,
                     'librenms_url': f"{client.base_url}/device/device={link.get('remote_device_id')}" if link.get('remote_device_id') else None

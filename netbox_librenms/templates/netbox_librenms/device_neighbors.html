@@ -104,8 +104,6 @@
                                     <th>Local Interface</th>
                                     <th>Status (Admin/Oper)</th>
                                     <th>Description</th>
-                                    <th>Speed</th>
-                                    <th>MAC Address</th>
                                     <th>Neighbor Device</th>
                                     <th>Neighbor Port</th>
                                     <th>Match Status</th>
@@ -122,15 +120,18 @@
                                             </span>
                                         </td>
                                         <td class="port-descr" style="text-align: left; font-size: 0.9rem;">{{ nb.local_descr|default:"-" }}</td>
-                                        <td class="port-speed" data-raw-speed="{{ nb.local_speed }}">
-                                            <!-- Dynamically formatted by JS -->
-                                        </td>
-                                        <td style="font-family: monospace; font-size: 0.9rem;">{{ nb.local_mac|default:"-" }}</td>
                                         <td style="text-align: left;">
                                             {% if nb.netbox_url %}
-                                                <a href="{{ nb.netbox_url }}" class="font-weight-bold">{{ nb.remote_device_name }}</a>
+                                                <a href="{{ nb.netbox_url }}" class="font-weight-bold" style="display: block;">
+                                                    {{ nb.remote_device_ip|default:nb.remote_device_name }}
+                                                </a>
                                             {% else %}
-                                                {{ nb.remote_device_name }}
+                                                <span class="font-weight-bold" style="display: block;">
+                                                    {{ nb.remote_device_ip|default:nb.remote_device_name }}
+                                                </span>
+                                            {% endif %}
+                                            {% if nb.remote_platform %}
+                                                <small class="text-muted">{{ nb.remote_platform }}</small>
                                             {% endif %}
                                         </td>
                                         <td>{{ nb.remote_port }}</td>
@@ -174,28 +175,4 @@
     </div>
 </div>
 
-<script>
-    function formatSpeed(speedBits) {
-        if (!speedBits || speedBits === "0") return "-";
-        var speed = parseInt(speedBits);
-        if (speed >= 100000000000) {
-            return (speed / 100000000000).toFixed(0) + "00 Gbps";
-        } else if (speed >= 1000000000) {
-            return (speed / 1000000000).toFixed(0) + " Gbps";
-        } else if (speed >= 1000000) {
-            return (speed / 1000000).toFixed(0) + " Mbps";
-        } else if (speed >= 1000) {
-            return (speed / 1000).toFixed(0) + " Kbps";
-        }
-        return speed + " bps";
-    }
-
-    document.addEventListener("DOMContentLoaded", function() {
-        var speedCells = document.querySelectorAll('.port-speed');
-        speedCells.forEach(function(cell) {
-            var raw = cell.getAttribute('data-raw-speed');
-            cell.textContent = formatSpeed(raw);
-        });
-    });
-</script>
 {% endblock content %}
