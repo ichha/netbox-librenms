@@ -267,15 +267,11 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                 'vlan': vlan,
             })
 
-        # Grab keys of the first port for debugging if available
-        raw_port_keys = list(ports[0].keys()) if ports else []
-
         return {
             'active_tab': 'librenms-interfaces',
             'configured': True,
             'device_found': True,
             'interfaces': interfaces_data,
-            'raw_port_keys': raw_port_keys,
             'libre_nms_web_url': f"{client.base_url}/device/device={device_id}/tab=ports"
         }
 
