@@ -226,12 +226,25 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             port_ips = list(set(port_ips))
 
             # Grab VLAN info from LibreNMS port object
-            vlan = port.get('port_vlan') or port.get('port_vlan_id') or port.get('vlan') or port.get('vlan_id') or "N/A"
+            vlan = None
+            vlan_list = port.get('vlans')
+            if isinstance(vlan_list, list) and vlan_list:
+                vlans_extracted = []
+                for v in vlan_list:
+                    vid = v.get('vlan_id') or v.get('vlan')
+                    if vid:
+                        vlans_extracted.append(str(vid))
+                if vlans_extracted:
+                    vlan = ", ".join(vlans_extracted)
+            
+            if not vlan:
+                vlan = port.get('port_vlan') or port.get('port_vlan_id') or port.get('vlan') or port.get('vlan_id') or "N/A"
+                
             if vlan == "1":
                 vlan = "1 (Default)"
 
             # Support both camelCase and lowercase field names
-            descr = port.get('ifDescr') or port.get('ifdescr') or port.get('ifAlias') or port.get('ifalias') or ''
+            descr = port.get('ifAlias') or port.get('ifalias') or port.get('ifDescr') or port.get('ifdescr') or ''
             
             raw_speed = port.get('ifSpeed') or port.get('ifspeed') or 0
             try:
@@ -340,7 +353,7 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                     nb_url = reverse('dcim:device', kwargs={'pk': nb_device.pk})
 
                 # Support both camelCase and lowercase field names
-                descr = local_port.get('ifDescr') or local_port.get('ifdescr') or local_port.get('ifAlias') or local_port.get('ifalias') or ''
+                descr = local_port.get('ifAlias') or local_port.get('ifalias') or local_port.get('ifDescr') or local_port.get('ifdescr') or ''
                 
                 raw_speed = local_port.get('ifSpeed') or local_port.get('ifspeed') or 0
                 try:
