@@ -20,5 +20,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["netbox_librenms"]
+packages = ["netbox_librenms", "netbox_librenms.api"]
 include-package-data = true
