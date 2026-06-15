@@ -350,15 +350,31 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             descr = port_info.get('ifAlias') or port_info.get('ifalias') or port_info.get('ifDescr') or port_info.get('ifdescr') or ''
             
             try:
-                Interface.objects.create(
+                # Create the interface in NetBox
+                interface = Interface.objects.create(
                     device=device,
                     name=name,
                     type=iftype,
                     description=descr[:200] if descr else '',
-                    mac_address=mac_clean,
                     enabled=True
                 )
                 added_count += 1
+                
+                # Assign MAC address if it exists (using NetBox v4.2+ MACAddress model)
+                if mac_clean:
+                    try:
+                        from dcim.models import MACAddress
+                        from django.contrib.contenttypes.models import ContentType
+                        
+                        interface_type = ContentType.objects.get_for_model(Interface)
+                        MACAddress.objects.create(
+                            mac_address=mac_clean,
+                            assigned_object_type=interface_type,
+                            assigned_object_id=interface.id
+                        )
+                    except Exception:
+                        # Don't fail the interface import if MAC assignment fails
+                        pass
             except Exception as e:
                 messages.error(request, f"Failed to add interface {name}: {str(e)}")
                 
