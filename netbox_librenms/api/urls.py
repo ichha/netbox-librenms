@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import DeviceGraphProxyView
 
-app_name = 'netbox_librenms-api'
+app_name = 'netbox_librenms'
 
 urlpatterns = [
     # Route: /api/plugins/librenms/device/<pk>/graph/

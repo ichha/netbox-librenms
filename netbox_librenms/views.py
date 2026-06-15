@@ -37,13 +37,28 @@ def get_librenms_device(client, netbox_device):
 def find_netbox_device_by_name_or_ip(name, ip=None):
     """
     Cross-references LLDP neighbor info back to a NetBox device object.
+    Automatically handles case where the hostname is returned as an IP address.
     """
+    if not name:
+        return None
+        
+    # Check if name is actually an IP address
+    is_ip = False
+    if '.' in name or ':' in name:
+        import re
+        if not re.search('[a-zA-Z]', name):
+            is_ip = True
+            
+    if is_ip:
+        ip = name
+        name = None
+
     if name:
         dev = Device.objects.filter(name__iexact=name).first()
         if dev:
             return dev
     if ip:
-        ip_clean = ip.split('/')[0]
+        ip_clean = ip.split('/')[0].strip()
         try:
             ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
             if ip_addr and ip_addr.assigned_object:
@@ -124,7 +139,7 @@ class DeviceLibreNMSOverviewView(generic.ObjectView):
         if allow_unauth_graphs:
             graph_base_url = f"{client.base_url}/graph.php?device={device_id}"
         else:
-            graph_base_url = reverse('plugins-api:netbox_librenms-api:device_graph_proxy', kwargs={'pk': instance.pk})
+            graph_base_url = reverse('plugins-api:netbox_librenms:device_graph_proxy', kwargs={'pk': instance.pk})
 
         return {
             'active_tab': 'librenms-overview',
@@ -275,17 +290,29 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
         # Filter links belonging to this device
         neighbors = []
         for link in all_links:
-            local_port_id = str(link.get('port_id'))
+            # Check local device match or local port match
+            link_local_dev_id = str(link.get('local_device_id') or link.get('device_id') or '')
+            link_local_port_id = str(link.get('local_port_id') or link.get('port_id') or '')
             
-            if local_port_id in port_id_map:
-                local_port = port_id_map[local_port_id]
-                local_port_name = local_port.get('ifName') or local_port.get('port_name_raw') or local_port.get('ifDescr')
+            is_match = False
+            if link_local_dev_id and link_local_dev_id == str(device_id):
+                is_match = True
+            elif link_local_port_id and link_local_port_id in port_id_map:
+                is_match = True
                 
-                remote_name = link.get('remote_hostname') or f"Device ID {link.get('remote_device_id')}"
+            if is_match:
+                local_port_name = 'Unknown'
+                if link_local_port_id in port_id_map:
+                    local_port = port_id_map[link_local_port_id]
+                    local_port_name = local_port.get('ifName') or local_port.get('port_name_raw') or local_port.get('ifDescr')
+                elif link.get('local_port'):
+                    local_port_name = link.get('local_port')
+                
+                remote_name = link.get('remote_hostname') or link.get('remote_device_name') or f"Device ID {link.get('remote_device_id')}"
                 remote_port = link.get('remote_port') or 'Unknown'
                 
                 # Check if this neighbor exists inside NetBox
-                nb_device = find_netbox_device_by_name_or_ip(link.get('remote_hostname'))
+                nb_device = find_netbox_device_by_name_or_ip(remote_name)
                 nb_url = None
                 if nb_device:
                     nb_url = reverse('dcim:device', kwargs={'pk': nb_device.pk})
