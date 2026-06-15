@@ -20,6 +20,30 @@
         justify-content: space-between;
         align-items: center;
     }
+    .status-badge-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .status-pill-up {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    .status-pill-down {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    .status-pill-other {
+        background-color: #e2e3e5;
+        color: #383d41;
+        border: 1px solid #d6d8db;
+    }
     .device-not-found {
         padding: 50px 20px;
         text-align: center;
@@ -78,9 +102,13 @@
                             <thead>
                                 <tr>
                                     <th>Local Interface</th>
+                                    <th>Status (Admin/Oper)</th>
+                                    <th>Description</th>
+                                    <th>Speed</th>
+                                    <th>MAC Address</th>
                                     <th>Neighbor Device</th>
                                     <th>Neighbor Port</th>
-                                    <th>Status</th>
+                                    <th>Match Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -88,6 +116,16 @@
                                 {% for nb in neighbors %}
                                     <tr>
                                         <td class="font-weight-bold" style="text-align: left;">{{ nb.local_port }}</td>
+                                        <td>
+                                            <span class="status-badge-pill {% if nb.local_admin_status == 'up' and nb.local_oper_status == 'up' %}status-pill-up{% elif nb.local_admin_status == 'down' or nb.local_oper_status == 'down' %}status-pill-down{% else %}status-pill-other{% endif %}">
+                                                {{ nb.local_admin_status }}/{{ nb.local_oper_status }}
+                                            </span>
+                                        </td>
+                                        <td class="port-descr" style="text-align: left; font-size: 0.9rem;">{{ nb.local_descr|default:"-" }}</td>
+                                        <td class="port-speed" data-raw-speed="{{ nb.local_speed }}">
+                                            <!-- Dynamically formatted by JS -->
+                                        </td>
+                                        <td style="font-family: monospace; font-size: 0.9rem;">{{ nb.local_mac|default:"-" }}</td>
                                         <td style="text-align: left;">
                                             {% if nb.netbox_url %}
                                                 <a href="{{ nb.netbox_url }}" class="font-weight-bold">{{ nb.remote_device_name }}</a>
@@ -107,12 +145,12 @@
                                             <div class="d-flex gap-1 justify-content-center">
                                                 {% if nb.netbox_url %}
                                                     <a href="{{ nb.netbox_url }}" class="btn btn-xs btn-primary">
-                                                        Open NetBox ↗
+                                                        Open NetBox
                                                     </a>
                                                 {% endif %}
                                                 {% if nb.librenms_url %}
                                                     <a href="{{ nb.librenms_url }}" target="_blank" class="btn btn-xs btn-outline-secondary">
-                                                        Open LibreNMS ↗
+                                                        Open LibreNMS
                                                     </a>
                                                 {% endif %}
                                             </div>
@@ -128,9 +166,6 @@
                             <p class="text-muted">
                                 LibreNMS has not discovered any LLDP, CDP, or FDP neighbors for this device.
                             </p>
-                            <p class="text-muted" style="font-size: 0.85rem;">
-                                Ensure the discovery-protocols module is enabled in LibreNMS for this device.
-                            </p>
                         </div>
                     {% endif %}
                 </div>
@@ -138,4 +173,29 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+    function formatSpeed(speedBits) {
+        if (!speedBits || speedBits === "0") return "-";
+        var speed = parseInt(speedBits);
+        if (speed >= 100000000000) {
+            return (speed / 100000000000).toFixed(0) + "00 Gbps";
+        } else if (speed >= 1000000000) {
+            return (speed / 1000000000).toFixed(0) + " Gbps";
+        } else if (speed >= 1000000) {
+            return (speed / 1000000).toFixed(0) + " Mbps";
+        } else if (speed >= 1000) {
+            return (speed / 1000).toFixed(0) + " Kbps";
+        }
+        return speed + " bps";
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        var speedCells = document.querySelectorAll('.port-speed');
+        speedCells.forEach(function(cell) {
+            var raw = cell.getAttribute('data-raw-speed');
+            cell.textContent = formatSpeed(raw);
+        });
+    });
+</script>
 {% endblock content %}

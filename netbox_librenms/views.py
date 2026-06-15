@@ -302,6 +302,7 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                 
             if is_match:
                 local_port_name = 'Unknown'
+                local_port = {}
                 if link_local_port_id in port_id_map:
                     local_port = port_id_map[link_local_port_id]
                     local_port_name = local_port.get('ifName') or local_port.get('port_name_raw') or local_port.get('ifDescr')
@@ -319,6 +320,11 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
 
                 neighbors.append({
                     'local_port': local_port_name,
+                    'local_descr': local_port.get('ifDescr') or '',
+                    'local_speed': int(local_port.get('ifSpeed') or 0),
+                    'local_mac': local_port.get('ifPhysAddress') or '',
+                    'local_admin_status': local_port.get('ifAdminStatus', 'unknown'),
+                    'local_oper_status': local_port.get('ifOperStatus', 'unknown'),
                     'remote_device_name': remote_name,
                     'remote_port': remote_port,
                     'netbox_url': nb_url,
