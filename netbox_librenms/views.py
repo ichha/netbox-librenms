@@ -213,8 +213,8 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
         # Build list of ports with integrated IP info
         interfaces_data = []
         for port in ports:
-            ifname = port.get('ifName') or port.get('port_name_raw') or port.get('ifDescr')
-            ifindex = port.get('ifIndex')
+            ifname = port.get('ifName') or port.get('ifname') or port.get('port_name_raw') or port.get('port_name') or port.get('ifDescr') or port.get('ifdescr') or ''
+            ifindex = port.get('ifIndex') or port.get('ifindex')
             
             # Find IPs for this port
             port_ips = []
@@ -226,17 +226,30 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             port_ips = list(set(port_ips))
 
             # Grab VLAN info from LibreNMS port object
-            vlan = port.get('port_vlan') or "N/A"
+            vlan = port.get('port_vlan') or port.get('port_vlan_id') or port.get('vlan') or port.get('vlan_id') or "N/A"
             if vlan == "1":
                 vlan = "1 (Default)"
 
+            # Support both camelCase and lowercase field names
+            descr = port.get('ifDescr') or port.get('ifdescr') or port.get('ifAlias') or port.get('ifalias') or ''
+            
+            raw_speed = port.get('ifSpeed') or port.get('ifspeed') or 0
+            try:
+                speed = int(raw_speed)
+            except ValueError:
+                speed = 0
+                
+            mac = port.get('ifPhysAddress') or port.get('ifphysaddress') or ''
+            admin_status = port.get('ifAdminStatus') or port.get('ifadminstatus') or 'unknown'
+            oper_status = port.get('ifOperStatus') or port.get('ifoperstatus') or 'unknown'
+
             interfaces_data.append({
                 'name': ifname,
-                'descr': port.get('ifDescr') or '',
-                'speed': int(port.get('ifSpeed') or 0),
-                'mac': port.get('ifPhysAddress') or '',
-                'admin_status': port.get('ifAdminStatus', 'unknown'),
-                'oper_status': port.get('ifOperStatus', 'unknown'),
+                'descr': descr,
+                'speed': speed,
+                'mac': mac,
+                'admin_status': admin_status,
+                'oper_status': oper_status,
                 'ips': port_ips,
                 'vlan': vlan,
             })
@@ -281,8 +294,12 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
         device_id = librenms_device.get('device_id')
         ports = client.get_device_ports(device_id)
         
-        # Build local port IDs mapping for this device
-        port_id_map = {str(p.get('port_id')): p for p in ports}
+        # Build local port IDs mapping for this device (support multiple port ID keys)
+        port_id_map = {}
+        for p in ports:
+            pid = p.get('port_id') or p.get('port_id') or p.get('id')
+            if pid:
+                port_id_map[str(pid)] = p
         
         # Fetch all links from LibreNMS
         all_links = client.get_links()
@@ -305,7 +322,7 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                 local_port = {}
                 if link_local_port_id in port_id_map:
                     local_port = port_id_map[link_local_port_id]
-                    local_port_name = local_port.get('ifName') or local_port.get('port_name_raw') or local_port.get('ifDescr')
+                    local_port_name = local_port.get('ifName') or local_port.get('ifname') or local_port.get('port_name_raw') or local_port.get('ifDescr')
                 elif link.get('local_port'):
                     local_port_name = link.get('local_port')
                 
@@ -318,13 +335,26 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                 if nb_device:
                     nb_url = reverse('dcim:device', kwargs={'pk': nb_device.pk})
 
+                # Support both camelCase and lowercase field names
+                descr = local_port.get('ifDescr') or local_port.get('ifdescr') or local_port.get('ifAlias') or local_port.get('ifalias') or ''
+                
+                raw_speed = local_port.get('ifSpeed') or local_port.get('ifspeed') or 0
+                try:
+                    speed = int(raw_speed)
+                except ValueError:
+                    speed = 0
+                    
+                mac = local_port.get('ifPhysAddress') or local_port.get('ifphysaddress') or ''
+                admin_status = local_port.get('ifAdminStatus') or local_port.get('ifadminstatus') or 'unknown'
+                oper_status = local_port.get('ifOperStatus') or local_port.get('ifoperstatus') or 'unknown'
+
                 neighbors.append({
                     'local_port': local_port_name,
-                    'local_descr': local_port.get('ifDescr') or '',
-                    'local_speed': int(local_port.get('ifSpeed') or 0),
-                    'local_mac': local_port.get('ifPhysAddress') or '',
-                    'local_admin_status': local_port.get('ifAdminStatus', 'unknown'),
-                    'local_oper_status': local_port.get('ifOperStatus', 'unknown'),
+                    'local_descr': descr,
+                    'local_speed': speed,
+                    'local_mac': mac,
+                    'local_admin_status': admin_status,
+                    'local_oper_status': oper_status,
                     'remote_device_name': remote_name,
                     'remote_port': remote_port,
                     'netbox_url': nb_url,
