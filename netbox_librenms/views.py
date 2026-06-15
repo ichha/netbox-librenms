@@ -133,7 +133,7 @@ class DeviceLibreNMSOverviewView(generic.ObjectView):
             'device_found': True,
             'librenms_device': librenms_device,
             'uptime_str': uptime_str,
-            'libre_nms_web_url': f"{client.base_url}/device/device={device_id}"
+            'libre_nms_web_url': f"{client.base_url}/device/device={librenms_device.get('device_id')}"
         }
 
 
