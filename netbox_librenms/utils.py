@@ -70,19 +70,25 @@ class LibreNMSClient:
     def get_device_ports(self, hostname_or_id):
         """
         Retrieves ports/interfaces for a device.
+        Explicitly requests all required columns to override default minimal API responses.
         """
+        columns = "port_id,device_id,ifName,ifIndex,ifDescr,ifAlias,ifSpeed,ifAdminStatus,ifOperStatus,ifPhysAddress,port_vlan"
         try:
-            res = self._request('GET', f"devices/{hostname_or_id}/ports", params={'with': 'vlans'})
+            res = self._request('GET', f"devices/{hostname_or_id}/ports", params={'with': 'vlans', 'columns': columns})
             if res.get('status') == 'ok':
                 return res.get('ports', [])
         except Exception:
-            # Fallback without params if with=vlans is not supported
             try:
-                res = self._request('GET', f"devices/{hostname_or_id}/ports")
+                res = self._request('GET', f"devices/{hostname_or_id}/ports", params={'columns': columns})
                 if res.get('status') == 'ok':
                     return res.get('ports', [])
             except Exception:
-                pass
+                try:
+                    res = self._request('GET', f"devices/{hostname_or_id}/ports")
+                    if res.get('status') == 'ok':
+                        return res.get('ports', [])
+                except Exception:
+                    pass
         return []
 
     def get_device_ips(self, hostname_or_id):
