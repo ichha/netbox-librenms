@@ -123,23 +123,9 @@ class DeviceLibreNMSOverviewView(generic.ObjectView):
                 'device_found': False,
             }
 
-        # Retrieve device alerts
-        device_id = librenms_device.get('device_id')
-        alerts = client.get_device_alerts(device_id)
-
         # Uptime calculation
         uptime_raw = librenms_device.get('uptime')
         uptime_str = format_uptime(uptime_raw)
-
-        # Check for unauthenticated graphs config setting
-        config_settings = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
-        allow_unauth_graphs = config_settings.get('allow_unauth_graphs', False)
-        
-        # Build base URL for graphs depending on proxy setting
-        if allow_unauth_graphs:
-            graph_base_url = f"{client.base_url}/graph.php?device={device_id}"
-        else:
-            graph_base_url = reverse('plugins-api:netbox_librenms-api:device_graph_proxy', kwargs={'pk': instance.pk})
 
         return {
             'active_tab': 'librenms-overview',
@@ -147,9 +133,6 @@ class DeviceLibreNMSOverviewView(generic.ObjectView):
             'device_found': True,
             'librenms_device': librenms_device,
             'uptime_str': uptime_str,
-            'alerts': alerts,
-            'graph_base_url': graph_base_url,
-            'allow_unauth_graphs': allow_unauth_graphs,
             'libre_nms_web_url': f"{client.base_url}/device/device={device_id}"
         }
 
