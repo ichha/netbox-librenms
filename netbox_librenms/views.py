@@ -1,7 +1,8 @@
 from django.conf import settings
 from django.contrib import messages
 from django.urls import reverse
-from dcim.models import Device
+from django.http import HttpResponseRedirect
+from dcim.models import Device, Interface
 from ipam.models import IPAddress
 from netbox.views import generic
 from utilities.views import ViewTab, register_model_view
@@ -95,6 +96,15 @@ def format_uptime(seconds):
     return " ".join(parts)
 
 
+def clean_mac(mac_str):
+    if not mac_str:
+        return None
+    cleaned = ''.join(c for c in mac_str if c.isalnum()).lower()
+    if len(cleaned) == 12:
+        return ':'.join(cleaned[i:i+2] for i in range(0, 12, 2))
+    return None
+
+
 @register_model_view(Device, name='librenms-overview', path='librenms-overview')
 class DeviceLibreNMSOverviewView(generic.ObjectView):
     queryset = Device.objects.all()
@@ -169,6 +179,9 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
         ports = client.get_device_ports(device_id)
         ips = client.get_device_ips(device_id)
 
+        # Get existing interfaces registered in NetBox
+        existing_interfaces = set(instance.interfaces.values_list('name', flat=True))
+
         # Map IP addresses to interface names or interface indices
         ip_map = {}
         for ip_info in ips:
@@ -239,6 +252,8 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             admin_status = port.get('ifAdminStatus') or port.get('ifadminstatus') or 'unknown'
             oper_status = port.get('ifOperStatus') or port.get('ifoperstatus') or 'unknown'
 
+            exists_in_netbox = ifname in existing_interfaces
+
             interfaces_data.append({
                 'name': ifname,
                 'descr': descr,
@@ -248,6 +263,7 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                 'oper_status': oper_status,
                 'ips': port_ips,
                 'vlan': vlan,
+                'exists_in_netbox': exists_in_netbox,
             })
 
         return {
@@ -257,6 +273,99 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             'interfaces': interfaces_data,
             'libre_nms_web_url': f"{client.base_url}/device/device={device_id}/tab=ports"
         }
+
+    def post(self, request, pk):
+        device = self.get_object(pk=pk)
+        selected_interfaces = request.POST.getlist('selected_interfaces')
+        
+        if not selected_interfaces:
+            messages.warning(request, "No interfaces selected.")
+            return HttpResponseRedirect(request.path)
+            
+        client = LibreNMSClient()
+        if not client.is_configured():
+            messages.error(request, "LibreNMS integration settings are not configured.")
+            return HttpResponseRedirect(request.path)
+            
+        librenms_device = get_librenms_device(client, device)
+        if not librenms_device:
+            messages.error(request, "Device not found in LibreNMS.")
+            return HttpResponseRedirect(request.path)
+            
+        device_id = librenms_device.get('device_id')
+        ports = client.get_device_ports(device_id)
+        
+        # Build a map of port name -> port details
+        ports_map = {}
+        for p in ports:
+            ifname = p.get('ifName') or p.get('ifname') or p.get('port_name_raw') or p.get('port_name') or p.get('ifDescr') or p.get('ifdescr') or ''
+            if ifname:
+                ports_map[ifname] = p
+                
+        # Get existing interfaces
+        existing_interfaces = set(device.interfaces.values_list('name', flat=True))
+        
+        added_count = 0
+        for name in selected_interfaces:
+            if name in existing_interfaces:
+                continue
+                
+            port_info = ports_map.get(name, {})
+            
+            # Determine speed
+            speed = 0
+            try:
+                speed = int(port_info.get('ifSpeed') or port_info.get('ifspeed') or 0)
+            except ValueError:
+                pass
+                
+            # Simple interface type mapping
+            name_lower = name.lower()
+            if any(x in name_lower for x in ['loopback', 'lo0', 'lo.']):
+                iftype = 'virtual'
+            elif any(x in name_lower for x in ['tunnel', 'tun']):
+                iftype = 'virtual'
+            elif 'null' in name_lower:
+                iftype = 'virtual'
+            elif any(x in name_lower for x in ['bundle-ether', 'bundle', 'be']):
+                iftype = 'virtual'
+            elif speed >= 100000000000:
+                iftype = '100gige'
+            elif speed >= 40000000000:
+                iftype = '40gige'
+            elif speed >= 25000000000:
+                iftype = '25gige'
+            elif speed >= 10000000000:
+                iftype = '10gige'
+            elif speed >= 1000000000:
+                iftype = '1gige'
+            else:
+                iftype = 'other'
+
+            # Clean and validate MAC address format
+            raw_mac = port_info.get('ifPhysAddress') or port_info.get('ifphysaddress') or ''
+            mac_clean = clean_mac(raw_mac)
+            
+            # Prioritize alias (user description) over name
+            descr = port_info.get('ifAlias') or port_info.get('ifalias') or port_info.get('ifDescr') or port_info.get('ifdescr') or ''
+            
+            try:
+                Interface.objects.create(
+                    device=device,
+                    name=name,
+                    type=iftype,
+                    description=descr[:200] if descr else '',
+                    mac_address=mac_clean,
+                    enabled=True
+                )
+                added_count += 1
+            except Exception as e:
+                messages.error(request, f"Failed to add interface {name}: {str(e)}")
+                
+        if added_count > 0:
+            messages.success(request, f"Successfully added {added_count} interfaces to {device.name} in NetBox.")
+            
+        return HttpResponseRedirect(request.path)
 
 
 @register_model_view(Device, name='librenms-neighbors', path='librenms-neighbors')

@@ -119,61 +119,82 @@
 
 
 
-                <div class="table-container">
-                    {% if interfaces %}
-                        <table class="table table-hover table-striped mb-0" id="interfaces-table">
-                            <thead>
-                                <tr>
-                                    <th>Interface Name</th>
-                                    <th>Status (Admin/Oper)</th>
-                                    <th>Description</th>
-                                    <th>Speed</th>
-                                    <th>MAC Address</th>
-                                    <th>IP Addresses</th>
-                                    <th>VLAN</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for port in interfaces %}
-                                    <tr class="interface-row">
-                                        <td class="port-name font-weight-bold" style="text-align: left;">{{ port.name }}</td>
-                                        <td>
-                                            <span class="status-badge-pill {% if port.admin_status == 'up' and port.oper_status == 'up' %}status-pill-up{% elif port.admin_status == 'down' or port.oper_status == 'down' %}status-pill-down{% else %}status-pill-other{% endif %}">
-                                                {{ port.admin_status }}/{{ port.oper_status }}
-                                            </span>
-                                        </td>
-                                        <td class="port-descr" style="text-align: left;">{{ port.descr|default:"-" }}</td>
-                                        <td class="port-speed" data-raw-speed="{{ port.speed }}">
-                                            <!-- Dynamically formatted by JS -->
-                                        </td>
-                                        <td style="font-family: monospace;">{{ port.mac|default:"-" }}</td>
-                                        <td class="port-ips" style="text-align: left;">
-                                            {% if port.ips %}
-                                                {% for ip in port.ips %}
-                                                    <span class="ip-badge">{{ ip }}</span>
-                                                {% endfor %}
-                                            {% else %}
-                                                -
-                                            {% endif %}
-                                        </td>
-                                        <td class="port-vlan">
-                                            {% if port.vlan != 'N/A' %}
-                                                <span class="vlan-badge">{{ port.vlan }}</span>
-                                            {% else %}
-                                                -
-                                            {% endif %}
-                                        </td>
+                <form method="post" action="">
+                    {% csrf_token %}
+                    <div class="table-container">
+                        {% if interfaces %}
+                            <table class="table table-hover table-striped mb-0" id="interfaces-table">
+                                <thead>
+                                    <tr>
+                                        <th>Interface Name</th>
+                                        <th>Status (Admin/Oper)</th>
+                                        <th>Description</th>
+                                        <th>Speed</th>
+                                        <th>MAC Address</th>
+                                        <th>IP Addresses</th>
+                                        <th>VLAN</th>
+                                        <th style="width: 100px; text-align: center;">Select</th>
                                     </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    {% else %}
-                        <div class="no-interfaces">
-                            <h4>No Interfaces Found</h4>
-                            <p class="text-muted">LibreNMS did not return any ports/interfaces for this device.</p>
-                        </div>
-                    {% endif %}
-                </div>
+                                </thead>
+                                <tbody>
+                                    {% for port in interfaces %}
+                                        <tr class="interface-row">
+                                            <td class="port-name font-weight-bold" style="text-align: left;">{{ port.name }}</td>
+                                            <td>
+                                                <span class="status-badge-pill {% if port.admin_status == 'up' and port.oper_status == 'up' %}status-pill-up{% elif port.admin_status == 'down' or port.oper_status == 'down' %}status-pill-down{% else %}status-pill-other{% endif %}">
+                                                    {{ port.admin_status }}/{{ port.oper_status }}
+                                                </span>
+                                            </td>
+                                            <td class="port-descr" style="text-align: left;">{{ port.descr|default:"-" }}</td>
+                                            <td class="port-speed" data-raw-speed="{{ port.speed }}">
+                                                <!-- Dynamically formatted by JS -->
+                                            </td>
+                                            <td style="font-family: monospace;">{{ port.mac|default:"-" }}</td>
+                                            <td class="port-ips" style="text-align: left;">
+                                                {% if port.ips %}
+                                                    {% for ip in port.ips %}
+                                                        <span class="ip-badge">{{ ip }}</span>
+                                                    {% endfor %}
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td class="port-vlan">
+                                                {% if port.vlan != 'N/A' %}
+                                                    <span class="vlan-badge">{{ port.vlan }}</span>
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td style="text-align: center; vertical-align: middle;">
+                                                {% if port.exists_in_netbox %}
+                                                    <span class="badge bg-success">Added</span>
+                                                {% else %}
+                                                    <input type="checkbox" name="selected_interfaces" value="{{ port.name }}" class="interface-checkbox">
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            
+                            <div class="card-footer p-3" style="background-color: #f8f9fa; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                                <div class="form-check">
+                                    <input type="checkbox" id="select-all-checkbox" class="form-check-input" onclick="toggleSelectAll(this)">
+                                    <label for="select-all-checkbox" class="form-check-label font-weight-bold" style="cursor: pointer; user-select: none;">Select All Unadded</label>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    ➕ Add Selected Interfaces
+                                </button>
+                            </div>
+                        {% else %}
+                            <div class="no-interfaces">
+                                <h4>No Interfaces Found</h4>
+                                <p class="text-muted">LibreNMS did not return any ports/interfaces for this device.</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </form>
             </div>
         {% endif %}
     </div>
@@ -209,6 +230,16 @@
                 row.style.display = '';
             } else {
                 row.style.display = 'none';
+            }
+        });
+    }
+
+    function toggleSelectAll(masterCheckbox) {
+        var checkboxes = document.querySelectorAll('.interface-checkbox');
+        checkboxes.forEach(function(cb) {
+            var row = cb.closest('tr');
+            if (row && row.style.display !== 'none') {
+                cb.checked = masterCheckbox.checked;
             }
         });
     }
