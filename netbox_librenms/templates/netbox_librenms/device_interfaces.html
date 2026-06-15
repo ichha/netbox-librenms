@@ -117,6 +117,13 @@
                     </div>
                 </div>
 
+                {% if raw_port_keys %}
+                    <div class="alert alert-info m-3" style="text-align: left; font-size: 0.85rem;">
+                        <strong>Debug info (API Keys returned by LibreNMS):</strong> 
+                        <code>{{ raw_port_keys|join:", " }}</code>
+                    </div>
+                {% endif %}
+
                 <div class="table-container">
                     {% if interfaces %}
                         <table class="table table-hover table-striped mb-0" id="interfaces-table">
