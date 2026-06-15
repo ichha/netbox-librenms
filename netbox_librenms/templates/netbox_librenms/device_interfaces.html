@@ -1,0 +1,222 @@
+{% extends 'generic/object.html' %}
+
+{% block content %}
+<style>
+    .librenms-card {
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        margin-bottom: 24px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .librenms-card-header {
+        background: linear-gradient(135deg, #1f4068, #162447);
+        color: #fff;
+        padding: 16px 20px;
+        font-weight: 600;
+        font-size: 1.15rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .status-badge-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .status-pill-up {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    .status-pill-down {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    .status-pill-other {
+        background-color: #e2e3e5;
+        color: #383d41;
+        border: 1px solid #d6d8db;
+    }
+    .search-container {
+        padding: 16px 20px;
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #eee;
+    }
+    .ip-badge {
+        display: inline-block;
+        background-color: #e8f4fd;
+        color: #0077c5;
+        border: 1px solid #bce0f6;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin: 2px;
+        font-family: monospace;
+        font-weight: 600;
+    }
+    .vlan-badge {
+        display: inline-block;
+        background-color: #f3e8ff;
+        color: #6b21a8;
+        border: 1px solid #e9d5ff;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .device-not-found {
+        padding: 50px 20px;
+        text-align: center;
+        color: #6b7280;
+    }
+    .table-container {
+        overflow-x: auto;
+    }
+    .no-interfaces {
+        padding: 40px;
+        text-align: center;
+        color: #6b7280;
+    }
+</style>
+
+<div class="row">
+    <div class="col col-md-12">
+        {% if not configured %}
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading">Integration Error</h4>
+                <p>{{ error_msg }}</p>
+            </div>
+        {% elif not device_found %}
+            <div class="card librenms-card">
+                <div class="device-not-found">
+                    <span style="font-size: 3rem;">⚠️</span>
+                    <h3 class="mt-2">Device Not Found in LibreNMS</h3>
+                    <p class="text-muted">Could not retrieve interfaces because the device was not found in LibreNMS.</p>
+                </div>
+            </div>
+        {% else %}
+            <div class="card librenms-card">
+                <div class="librenms-card-header">
+                    <span>LibreNMS Interface List</span>
+                    <a href="{{ libre_nms_web_url }}" target="_blank" class="btn btn-sm btn-outline-light">
+                        View Ports in LibreNMS ↗
+                    </a>
+                </div>
+
+                <div class="search-container">
+                    <div class="input-group">
+                        <span class="input-group-text" id="basic-addon1">🔍</span>
+                        <input type="text" id="interface-search" class="form-control" placeholder="Search by name, description, IP, or VLAN..." aria-label="Search" aria-describedby="basic-addon1" onkeyup="filterInterfaces()">
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    {% if interfaces %}
+                        <table class="table table-hover table-striped mb-0" id="interfaces-table">
+                            <thead>
+                                <tr>
+                                    <th>Interface Name</th>
+                                    <th>Status (Admin/Oper)</th>
+                                    <th>Description</th>
+                                    <th>Speed</th>
+                                    <th>MAC Address</th>
+                                    <th>IP Addresses</th>
+                                    <th>VLAN</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for port in interfaces %}
+                                    <tr class="interface-row">
+                                        <td class="port-name font-weight-bold" style="text-align: left;">{{ port.name }}</td>
+                                        <td>
+                                            <span class="status-badge-pill {% if port.admin_status == 'up' and port.oper_status == 'up' %}status-pill-up{% elif port.admin_status == 'down' or port.oper_status == 'down' %}status-pill-down{% else %}status-pill-other{% endif %}">
+                                                {{ port.admin_status }}/{{ port.oper_status }}
+                                            </span>
+                                        </td>
+                                        <td class="port-descr" style="text-align: left;">{{ port.descr|default:"-" }}</td>
+                                        <td class="port-speed" data-raw-speed="{{ port.speed }}">
+                                            <!-- Dynamically formatted by JS -->
+                                        </td>
+                                        <td style="font-family: monospace;">{{ port.mac|default:"-" }}</td>
+                                        <td class="port-ips" style="text-align: left;">
+                                            {% if port.ips %}
+                                                {% for ip in port.ips %}
+                                                    <span class="ip-badge">{{ ip }}</span>
+                                                {% endfor %}
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td class="port-vlan">
+                                            {% if port.vlan != 'N/A' %}
+                                                <span class="vlan-badge">{{ port.vlan }}</span>
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <div class="no-interfaces">
+                            <h4>No Interfaces Found</h4>
+                            <p class="text-muted">LibreNMS did not return any ports/interfaces for this device.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    function formatSpeed(speedBits) {
+        if (!speedBits || speedBits === "0") return "-";
+        var speed = parseInt(speedBits);
+        if (speed >= 100000000000) {
+            return (speed / 100000000000).toFixed(0) + "00 Gbps";
+        } else if (speed >= 1000000000) {
+            return (speed / 1000000000).toFixed(0) + " Gbps";
+        } else if (speed >= 1000000) {
+            return (speed / 1000000).toFixed(0) + " Mbps";
+        } else if (speed >= 1000) {
+            return (speed / 1000).toFixed(0) + " Kbps";
+        }
+        return speed + " bps";
+    }
+
+    function filterInterfaces() {
+        var query = document.getElementById('interface-search').value.toLowerCase();
+        var rows = document.querySelectorAll('.interface-row');
+        
+        rows.forEach(function(row) {
+            var name = row.querySelector('.port-name').textContent.toLowerCase();
+            var descr = row.querySelector('.port-descr').textContent.toLowerCase();
+            var ips = row.querySelector('.port-ips').textContent.toLowerCase();
+            var vlan = row.querySelector('.port-vlan').textContent.toLowerCase();
+            
+            if (name.includes(query) || descr.includes(query) || ips.includes(query) || vlan.includes(query)) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        var speedCells = document.querySelectorAll('.port-speed');
+        speedCells.forEach(function(cell) {
+            var raw = cell.getAttribute('data-raw-speed');
+            cell.textContent = formatSpeed(raw);
+        });
+    });
+</script>
+{% endblock content %}

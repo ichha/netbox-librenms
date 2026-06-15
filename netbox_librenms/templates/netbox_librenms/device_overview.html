@@ -1,0 +1,321 @@
+{% extends 'generic/object.html' %}
+
+{% block content %}
+<style>
+    /* Styling for premium LibreNMS integration */
+    .librenms-card {
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        margin-bottom: 24px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .librenms-card-header {
+        background: linear-gradient(135deg, #1f4068, #162447);
+        color: #fff;
+        padding: 16px 20px;
+        font-weight: 600;
+        font-size: 1.15rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .librenms-status-pulse {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    .status-up {
+        background-color: #2ed573;
+        box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7);
+        animation: pulse-green 2s infinite;
+    }
+    .status-down {
+        background-color: #ff4757;
+        box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7);
+        animation: pulse-red 2s infinite;
+    }
+    @keyframes pulse-green {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(46, 213, 115, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0); }
+    }
+    @keyframes pulse-red {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(255, 71, 87, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
+    }
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        padding: 20px;
+    }
+    .metric-item {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 16px;
+        border-left: 4px solid #1f4068;
+    }
+    .metric-label {
+        font-size: 0.85rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+        font-weight: 500;
+    }
+    .metric-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    .graph-container {
+        padding: 20px;
+        text-align: center;
+        background: #fafafa;
+        border-top: 1px solid #eee;
+    }
+    .graph-controls {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-bottom: 15px;
+    }
+    .graph-btn {
+        background-color: #fff;
+        border: 1px solid #ced4da;
+        color: #495057;
+        padding: 6px 16px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .graph-btn.active, .graph-btn:hover {
+        background-color: #1f4068;
+        color: #fff;
+        border-color: #1f4068;
+    }
+    .alerts-container {
+        padding: 20px;
+    }
+    .alert-row {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        background-color: #fff5f5;
+        border: 1px solid #ffe3e3;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        border-left: 5px solid #ff4757;
+        text-align: left;
+    }
+    .alert-row.warning {
+        background-color: #fffbeb;
+        border-color: #fef3c7;
+        border-left-color: #f59e0b;
+    }
+    .alert-icon {
+        font-size: 1.25rem;
+        margin-right: 12px;
+    }
+    .alert-details {
+        flex-grow: 1;
+    }
+    .alert-rule {
+        font-weight: 600;
+        color: #1f2937;
+    }
+    .alert-time {
+        font-size: 0.8rem;
+        color: #6b7280;
+    }
+    .alert-badge {
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .badge-critical { background-color: #fecaca; color: #991b1b; }
+    .badge-warning { background-color: #fef3c7; color: #92400e; }
+    .no-alerts {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 40px;
+        color: #6b7280;
+    }
+    .no-alerts-icon {
+        font-size: 3rem;
+        color: #10b981;
+        margin-bottom: 10px;
+    }
+    .device-not-found {
+        padding: 50px 20px;
+        text-align: center;
+        color: #6b7280;
+    }
+</style>
+
+<div class="row">
+    <div class="col col-md-12">
+        {% if not configured %}
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading">Integration Error</h4>
+                <p>{{ error_msg }}</p>
+            </div>
+        {% elif not device_found %}
+            <div class="card librenms-card">
+                <div class="device-not-found">
+                    <span class="no-alerts-icon" style="color: #ff4757;">⚠️</span>
+                    <h3>Device Not Found in LibreNMS</h3>
+                    <p class="mt-2">
+                        Could not locate device in LibreNMS using primary IPs (IPv4: <code>{{ object.primary_ip4 }}</code>, IPv6: <code>{{ object.primary_ip6 }}</code>) or Device Name (<code>{{ object.name }}</code>).
+                    </p>
+                    <p class="text-muted">Ensure the device is added in LibreNMS and that its IP address matches the primary IP configured in NetBox.</p>
+                </div>
+            </div>
+        {% else %}
+            <div class="card librenms-card">
+                <div class="librenms-card-header">
+                    <div class="d-flex align-items-center">
+                        <span class="librenms-status-pulse {% if librenms_device.status %}status-up{% else %}status-down{% endif %}"></span>
+                        <span>LibreNMS Status Summary</span>
+                    </div>
+                    <a href="{{ libre_nms_web_url }}" target="_blank" class="btn btn-sm btn-outline-light">
+                        Open in LibreNMS ↗
+                    </a>
+                </div>
+                
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <div class="metric-label">SNMP SysName</div>
+                        <div class="metric-value">{{ librenms_device.sysName|default:librenms_device.hostname }}</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">LibreNMS ID</div>
+                        <div class="metric-value">#{{ librenms_device.device_id }}</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">IP Address</div>
+                        <div class="metric-value">{{ librenms_device.ip }}</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Uptime</div>
+                        <div class="metric-value">{{ uptime_str }}</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">OS / Hardware</div>
+                        <div class="metric-value">{{ librenms_device.hardware }} ({{ librenms_device.os|upper }})</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Serial Number</div>
+                        <div class="metric-value">{{ librenms_device.serial|default:"N/A" }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Alerts Card -->
+            <div class="card librenms-card">
+                <div class="librenms-card-header" style="background: linear-gradient(135deg, #2c3e50, #34495e);">
+                    <span>Active Alerts</span>
+                </div>
+                <div class="alerts-container">
+                    {% if alerts %}
+                        {% for alert in alerts %}
+                            <div class="alert-row {% if alert.severity == 'warning' %}warning{% endif %}">
+                                <span class="alert-icon">{% if alert.severity == 'critical' %}🚨{% else %}⚠️{% endif %}</span>
+                                <div class="alert-details">
+                                    <div class="alert-rule">{{ alert.rule_name }}</div>
+                                    <div class="alert-time">Logged: {{ alert.time_logged }}</div>
+                                </div>
+                                <span class="alert-badge {% if alert.severity == 'critical' %}badge-critical{% else %}badge-warning{% endif %}">
+                                    {{ alert.severity }}
+                                </span>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="no-alerts">
+                            <span class="no-alerts-icon">✔</span>
+                            <h4>No Active Alerts</h4>
+                            <p class="text-muted">This device is healthy. No unresolved alerts in LibreNMS.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Performance Graphs Card -->
+            <div class="card librenms-card">
+                <div class="librenms-card-header" style="background: linear-gradient(135deg, #1f4068, #162447);">
+                    <span>Performance Graphs</span>
+                </div>
+                <div class="graph-container">
+                    <div class="graph-controls">
+                        <!-- Select Graph Type -->
+                        <select id="graph-type" class="form-select form-select-sm d-inline-block w-auto mr-3" onchange="updateGraph()">
+                            <option value="device_processor">CPU Processor Usage</option>
+                            <option value="device_mempool">Memory Pool Usage</option>
+                        </select>
+                        
+                        <!-- Select Time Range -->
+                        <button type="button" class="graph-btn active" data-range="-1d" onclick="setRange(this)">Day</button>
+                        <button type="button" class="graph-btn" data-range="-1w" onclick="setRange(this)">Week</button>
+                        <button type="button" class="graph-btn" data-range="-1m" onclick="setRange(this)">Month</button>
+                    </div>
+
+                    <div class="text-center mt-3 position-relative" style="min-height: 200px;">
+                        <img id="librenms-graph" src="" class="img-fluid rounded shadow-sm" style="display: none;" onload="this.style.display='inline-block'; document.getElementById('graph-loader').style.display='none';" />
+                        <div id="graph-loader" class="position-absolute top-50 start-50 translate-middle">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    var currentRange = '-1d';
+    var graphBaseUrl = '{{ graph_base_url|safe }}';
+    var allowUnauthGraphs = {% if allow_unauth_graphs %}true{% else %}false{% endif %};
+
+    function updateGraph() {
+        var graphType = document.getElementById('graph-type').value;
+        var graphImg = document.getElementById('librenms-graph');
+        var graphLoader = document.getElementById('graph-loader');
+        if (!graphImg || !graphLoader) return;
+        
+        graphImg.style.display = 'none';
+        graphLoader.style.display = 'block';
+
+        if (allowUnauthGraphs) {
+            graphImg.src = graphBaseUrl + '&type=' + graphType + '&from=' + currentRange + '&t=' + new Date().getTime();
+        } else {
+            graphImg.src = graphBaseUrl + '?type=' + graphType + '&range=' + currentRange + '&t=' + new Date().getTime();
+        }
+    }
+
+    function setRange(btn) {
+        var buttons = document.querySelectorAll('.graph-btn');
+        buttons.forEach(function(b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        currentRange = btn.getAttribute('data-range');
+        updateGraph();
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        if (document.getElementById('librenms-graph')) {
+            updateGraph();
+        }
+    });
+</script>
+{% endblock content %}

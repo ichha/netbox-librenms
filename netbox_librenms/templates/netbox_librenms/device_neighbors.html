@@ -1,0 +1,141 @@
+{% extends 'generic/object.html' %}
+
+{% block content %}
+<style>
+    .librenms-card {
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        margin-bottom: 24px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .librenms-card-header {
+        background: linear-gradient(135deg, #1f4068, #162447);
+        color: #fff;
+        padding: 16px 20px;
+        font-weight: 600;
+        font-size: 1.15rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .device-not-found {
+        padding: 50px 20px;
+        text-align: center;
+        color: #6b7280;
+    }
+    .table-container {
+        overflow-x: auto;
+    }
+    .no-neighbors {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 50px 20px;
+        color: #6b7280;
+        text-align: center;
+    }
+    .no-neighbors-icon {
+        font-size: 3rem;
+        color: #3b82f6;
+        margin-bottom: 15px;
+    }
+    .btn-xs {
+        padding: 2px 6px;
+        font-size: 0.75rem;
+        border-radius: 4px;
+    }
+</style>
+
+<div class="row">
+    <div class="col col-md-12">
+        {% if not configured %}
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading">Integration Error</h4>
+                <p>{{ error_msg }}</p>
+            </div>
+        {% elif not device_found %}
+            <div class="card librenms-card">
+                <div class="device-not-found">
+                    <span style="font-size: 3rem;">⚠️</span>
+                    <h3 class="mt-2">Device Not Found in LibreNMS</h3>
+                    <p class="text-muted">Could not retrieve neighbors because the device was not found in LibreNMS.</p>
+                </div>
+            </div>
+        {% else %}
+            <div class="card librenms-card">
+                <div class="librenms-card-header">
+                    <span>LibreNMS LLDP / CDP Neighbors</span>
+                    <a href="{{ libre_nms_web_url }}" target="_blank" class="btn btn-sm btn-outline-light">
+                        View Chassis in LibreNMS ↗
+                    </a>
+                </div>
+
+                <div class="table-container">
+                    {% if neighbors %}
+                        <table class="table table-hover table-striped mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Local Interface</th>
+                                    <th>Neighbor Device</th>
+                                    <th>Neighbor Port</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for nb in neighbors %}
+                                    <tr>
+                                        <td class="font-weight-bold" style="text-align: left;">{{ nb.local_port }}</td>
+                                        <td style="text-align: left;">
+                                            {% if nb.netbox_url %}
+                                                <a href="{{ nb.netbox_url }}" class="font-weight-bold">{{ nb.remote_device_name }}</a>
+                                            {% else %}
+                                                {{ nb.remote_device_name }}
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ nb.remote_port }}</td>
+                                        <td>
+                                            {% if nb.netbox_url %}
+                                                <span class="badge bg-success">NetBox Match</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Unmapped</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="d-flex gap-1 justify-content-center">
+                                                {% if nb.netbox_url %}
+                                                    <a href="{{ nb.netbox_url }}" class="btn btn-xs btn-primary">
+                                                        Open NetBox ↗
+                                                    </a>
+                                                {% endif %}
+                                                {% if nb.librenms_url %}
+                                                    <a href="{{ nb.librenms_url }}" target="_blank" class="btn btn-xs btn-outline-secondary">
+                                                        Open LibreNMS ↗
+                                                    </a>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <div class="no-neighbors">
+                            <span class="no-neighbors-icon">🔗</span>
+                            <h4>No Neighbors Discovered</h4>
+                            <p class="text-muted">
+                                LibreNMS has not discovered any LLDP, CDP, or FDP neighbors for this device.
+                            </p>
+                            <p class="text-muted" style="font-size: 0.85rem;">
+                                Ensure the discovery-protocols module is enabled in LibreNMS for this device.
+                            </p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock content %}

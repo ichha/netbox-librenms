@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netbox-librenms"
+version = "0.1.0"
+description = "A NetBox plugin to integrate LibreNMS monitoring data, interfaces, and LLDP neighbors."
+readme = "README.md"
+authors = [
+    { name = "Antigravity", email = "antigravity@example.com" }
+]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Framework :: Django",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "requests"
+]
+
+[tool.setuptools]
+packages = ["netbox_librenms"]
+include-package-data = true

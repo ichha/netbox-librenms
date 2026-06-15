@@ -1,0 +1,307 @@
+from django.conf import settings
+from django.contrib import messages
+from django.urls import reverse
+from dcim.models import Device
+from ipam.models import IPAddress
+from netbox.views import generic
+from utilities.views import ViewTab, register_model_view
+from .utils import LibreNMSClient
+
+def get_librenms_device(client, netbox_device):
+    """
+    Find corresponding device in LibreNMS.
+    First tries primary IPv4, then primary IPv6, then falls back to name.
+    """
+    # Try matching by IPv4
+    if netbox_device.primary_ip4 and netbox_device.primary_ip4.address:
+        ip = str(netbox_device.primary_ip4.address.ip)
+        dev = client.get_device(ip)
+        if dev:
+            return dev
+            
+    # Try matching by IPv6
+    if netbox_device.primary_ip6 and netbox_device.primary_ip6.address:
+        ip = str(netbox_device.primary_ip6.address.ip)
+        dev = client.get_device(ip)
+        if dev:
+            return dev
+            
+    # Fallback to device name
+    if netbox_device.name:
+        dev = client.get_device(netbox_device.name)
+        if dev:
+            return dev
+            
+    return None
+
+def find_netbox_device_by_name_or_ip(name, ip=None):
+    """
+    Cross-references LLDP neighbor info back to a NetBox device object.
+    """
+    if name:
+        dev = Device.objects.filter(name__iexact=name).first()
+        if dev:
+            return dev
+    if ip:
+        ip_clean = ip.split('/')[0]
+        try:
+            ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
+            if ip_addr and ip_addr.assigned_object:
+                if hasattr(ip_addr.assigned_object, 'device'):
+                    return ip_addr.assigned_object.device
+        except Exception:
+            pass
+    return None
+
+def format_uptime(seconds):
+    """
+    Formats uptime in seconds to a human-readable format.
+    """
+    if not seconds:
+        return "Unknown"
+    try:
+        seconds = int(seconds)
+    except ValueError:
+        return str(seconds)
+        
+    days, r = divmod(seconds, 86400)
+    hours, r = divmod(r, 3600)
+    minutes, seconds = divmod(r, 60)
+    
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if len(parts) == 0:
+        return f"{seconds}s"
+    return " ".join(parts)
+
+
+@register_model_view(Device, name='librenms-overview', path='librenms-overview')
+class DeviceLibreNMSOverviewView(generic.ObjectView):
+    queryset = Device.objects.all()
+    template_name = 'netbox_librenms/device_overview.html'
+    tab = ViewTab(
+        label='LibreNMS-Overview',
+        badge=None,
+        weight=2000,
+        hide_if_empty=False
+    )
+
+    def get_extra_context(self, request, instance):
+        client = LibreNMSClient()
+        if not client.is_configured():
+            return {
+                'active_tab': 'librenms-overview',
+                'configured': False,
+                'error_msg': 'LibreNMS integration settings are not configured in configuration.py.'
+            }
+
+        librenms_device = get_librenms_device(client, instance)
+        if not librenms_device:
+            return {
+                'active_tab': 'librenms-overview',
+                'configured': True,
+                'device_found': False,
+            }
+
+        # Retrieve device alerts
+        device_id = librenms_device.get('device_id')
+        alerts = client.get_device_alerts(device_id)
+
+        # Uptime calculation
+        uptime_raw = librenms_device.get('uptime')
+        uptime_str = format_uptime(uptime_raw)
+
+        # Check for unauthenticated graphs config setting
+        config_settings = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
+        allow_unauth_graphs = config_settings.get('allow_unauth_graphs', False)
+        
+        # Build base URL for graphs depending on proxy setting
+        if allow_unauth_graphs:
+            graph_base_url = f"{client.base_url}/graph.php?device={device_id}"
+        else:
+            graph_base_url = reverse('plugins-api:netbox_librenms-api:device_graph_proxy', kwargs={'pk': instance.pk})
+
+        return {
+            'active_tab': 'librenms-overview',
+            'configured': True,
+            'device_found': True,
+            'librenms_device': librenms_device,
+            'uptime_str': uptime_str,
+            'alerts': alerts,
+            'graph_base_url': graph_base_url,
+            'allow_unauth_graphs': allow_unauth_graphs,
+            'libre_nms_web_url': f"{client.base_url}/device/device={device_id}"
+        }
+
+
+@register_model_view(Device, name='librenms-interfaces', path='librenms-interfaces')
+class DeviceLibreNMSInterfacesView(generic.ObjectView):
+    queryset = Device.objects.all()
+    template_name = 'netbox_librenms/device_interfaces.html'
+    tab = ViewTab(
+        label='LibreNMS-Interface',
+        badge=None,
+        weight=2010,
+        hide_if_empty=False
+    )
+
+    def get_extra_context(self, request, instance):
+        client = LibreNMSClient()
+        if not client.is_configured():
+            return {
+                'active_tab': 'librenms-interfaces',
+                'configured': False,
+                'error_msg': 'LibreNMS integration settings are not configured.'
+            }
+
+        librenms_device = get_librenms_device(client, instance)
+        if not librenms_device:
+            return {
+                'active_tab': 'librenms-interfaces',
+                'configured': True,
+                'device_found': False
+            }
+
+        device_id = librenms_device.get('device_id')
+        ports = client.get_device_ports(device_id)
+        ips = client.get_device_ips(device_id)
+
+        # Map IP addresses to interface names or interface indices
+        ip_map = {}
+        for ip_info in ips:
+            ifname = ip_info.get('ifName')
+            ifindex = ip_info.get('ifIndex')
+            
+            # Form IP string
+            v4 = ip_info.get('ipv4_address')
+            v4_len = ip_info.get('ipv4_prefixlen')
+            v6 = ip_info.get('ipv6_address')
+            v6_len = ip_info.get('ipv6_prefixlen')
+            
+            ip_str_list = []
+            if v4:
+                ip_str_list.append(f"{v4}/{v4_len}" if v4_len else v4)
+            if v6:
+                ip_str_list.append(f"{v6}/{v6_len}" if v6_len else v6)
+
+            for key in [ifname, ifindex]:
+                if key:
+                    if key not in ip_map:
+                        ip_map[key] = []
+                    ip_map[key].extend(ip_str_list)
+
+        # Build list of ports with integrated IP info
+        interfaces_data = []
+        for port in ports:
+            ifname = port.get('ifName') or port.get('port_name_raw') or port.get('ifDescr')
+            ifindex = port.get('ifIndex')
+            
+            # Find IPs for this port
+            port_ips = []
+            if ifname in ip_map:
+                port_ips.extend(ip_map[ifname])
+            if ifindex in ip_map:
+                port_ips.extend(ip_map[ifindex])
+            # De-duplicate
+            port_ips = list(set(port_ips))
+
+            # Grab VLAN info from LibreNMS port object
+            vlan = port.get('port_vlan') or "N/A"
+            if vlan == "1":
+                vlan = "1 (Default)"
+
+            interfaces_data.append({
+                'name': ifname,
+                'descr': port.get('ifDescr') or '',
+                'speed': int(port.get('ifSpeed') or 0),
+                'mac': port.get('ifPhysAddress') or '',
+                'admin_status': port.get('ifAdminStatus', 'unknown'),
+                'oper_status': port.get('ifOperStatus', 'unknown'),
+                'ips': port_ips,
+                'vlan': vlan,
+            })
+
+        return {
+            'active_tab': 'librenms-interfaces',
+            'configured': True,
+            'device_found': True,
+            'interfaces': interfaces_data,
+            'libre_nms_web_url': f"{client.base_url}/device/device={device_id}/tab=ports"
+        }
+
+
+@register_model_view(Device, name='librenms-neighbors', path='librenms-neighbors')
+class DeviceLibreNMSNeighborsView(generic.ObjectView):
+    queryset = Device.objects.all()
+    template_name = 'netbox_librenms/device_neighbors.html'
+    tab = ViewTab(
+        label='LibreNMS-Neighbour',
+        badge=None,
+        weight=2020,
+        hide_if_empty=False
+    )
+
+    def get_extra_context(self, request, instance):
+        client = LibreNMSClient()
+        if not client.is_configured():
+            return {
+                'active_tab': 'librenms-neighbors',
+                'configured': False,
+                'error_msg': 'LibreNMS integration settings are not configured.'
+            }
+
+        librenms_device = get_librenms_device(client, instance)
+        if not librenms_device:
+            return {
+                'active_tab': 'librenms-neighbors',
+                'configured': True,
+                'device_found': False
+            }
+
+        device_id = librenms_device.get('device_id')
+        ports = client.get_device_ports(device_id)
+        
+        # Build local port IDs mapping for this device
+        port_id_map = {str(p.get('port_id')): p for p in ports}
+        
+        # Fetch all links from LibreNMS
+        all_links = client.get_links()
+        
+        # Filter links belonging to this device
+        neighbors = []
+        for link in all_links:
+            local_port_id = str(link.get('port_id'))
+            
+            if local_port_id in port_id_map:
+                local_port = port_id_map[local_port_id]
+                local_port_name = local_port.get('ifName') or local_port.get('port_name_raw') or local_port.get('ifDescr')
+                
+                remote_name = link.get('remote_hostname') or f"Device ID {link.get('remote_device_id')}"
+                remote_port = link.get('remote_port') or 'Unknown'
+                
+                # Check if this neighbor exists inside NetBox
+                nb_device = find_netbox_device_by_name_or_ip(link.get('remote_hostname'))
+                nb_url = None
+                if nb_device:
+                    nb_url = reverse('dcim:device', kwargs={'pk': nb_device.pk})
+
+                neighbors.append({
+                    'local_port': local_port_name,
+                    'remote_device_name': remote_name,
+                    'remote_port': remote_port,
+                    'netbox_url': nb_url,
+                    'librenms_url': f"{client.base_url}/device/device={link.get('remote_device_id')}" if link.get('remote_device_id') else None
+                })
+
+        return {
+            'active_tab': 'librenms-neighbors',
+            'configured': True,
+            'device_found': True,
+            'neighbors': neighbors,
+            'libre_nms_web_url': f"{client.base_url}/device/device={device_id}/tab=chassis"
+        }
