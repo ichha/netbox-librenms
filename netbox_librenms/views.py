@@ -711,17 +711,19 @@ from django.views import View
 from django.http import HttpResponse, Http404
 
 def match_interface_to_port(netbox_iface_name, port_list):
-    # Normalize name: lowercase and strip spaces
     nb_name = netbox_iface_name.lower().strip()
     
-    # 1. Exact match on ifName or ifDescr
+    # 1. First pass: exact match on any name key or ifDescr key
     for p in port_list:
-        ifname = (p.get('ifName') or '').lower().strip()
-        ifdescr = (p.get('ifDescr') or '').lower().strip()
-        if nb_name == ifname or nb_name == ifdescr:
+        names = []
+        for key in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
+            val = p.get(key)
+            if val:
+                names.append(str(val).lower().strip())
+        if nb_name in names:
             return p
             
-    # 2. Try matching cleaned/shortened names (e.g. GigabitEthernet0/1 -> gi0/1)
+    # 2. Second pass: Try matching cleaned/shortened names (e.g. GigabitEthernet0/1 -> gi0/1)
     abbrevs = {
         'gigabitethernet': 'gi',
         'fastethernet': 'fa',
@@ -744,38 +746,46 @@ def match_interface_to_port(netbox_iface_name, port_list):
         
     nb_abbrev = abbreviate(nb_name)
     for p in port_list:
-        ifname = (p.get('ifName') or '').lower().strip()
-        ifdescr = (p.get('ifDescr') or '').lower().strip()
-        if nb_abbrev == abbreviate(ifname) or nb_abbrev == abbreviate(ifdescr):
-            return p
-            
+        names = []
+        for key in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
+            val = p.get(key)
+            if val:
+                names.append(str(val).lower().strip())
+        for name in names:
+            if nb_abbrev == abbreviate(name):
+                return p
+                
     return None
 
 class InterfaceLibreNMSGraphView(View):
     def get(self, request, pk):
+        import logging
+        logger = logging.getLogger('netbox.plugins.netbox_librenms')
+        
         try:
             interface = Interface.objects.get(pk=pk)
         except Interface.DoesNotExist:
+            logger.error(f"Interface with PK {pk} not found in NetBox")
             raise Http404("Interface not found")
+            
+        logger.info(f"Fetching LibreNMS graph for interface {interface.name} (device: {interface.device.name})")
             
         client = LibreNMSClient()
         if not client.is_configured():
+            logger.error("LibreNMS integration settings are not configured in NetBox")
             return HttpResponse("LibreNMS not configured", status=500)
             
         librenms_device = get_librenms_device(client, interface.device)
         if not librenms_device:
+            logger.error(f"Device {interface.device.name} not found in LibreNMS")
             return HttpResponse("Device not found in LibreNMS", status=404)
             
         device_id = librenms_device.get('device_id')
         ports = client.get_device_ports(device_id)
         
+        logger.info(f"Retrieved {len(ports)} ports for device {interface.device.name} from LibreNMS")
+        
         target_port = match_interface_to_port(interface.name, ports)
-        if not target_port:
-            return HttpResponse("Interface not found in LibreNMS", status=404)
-            
-        port_id = target_port.get('port_id')
-        if not port_id:
-            return HttpResponse("Port ID not found in LibreNMS", status=404)
         
         # Translate time range query parameter to 'from' parameter
         time_range = request.GET.get('range', '24h')
@@ -788,14 +798,37 @@ class InterfaceLibreNMSGraphView(View):
         }
         from_val = range_map.get(time_range, '-1d')
         
-        # Use multiport bits graph endpoint which accepts port ID and handles slashes/special characters perfectly
-        endpoint = f"portgroups/multiport/bits/{port_id}"
+        # 1. Try multiport bits by port ID first if found (helps bypass URL encoding web server limitations)
+        if target_port and target_port.get('port_id'):
+            port_id = target_port.get('port_id')
+            endpoint = f"portgroups/multiport/bits/{port_id}"
+            try:
+                logger.info(f"Attempting to fetch graph via multiport bits endpoint: {endpoint}")
+                response = client._request('GET', endpoint, params={'from': from_val}, stream=True)
+                return HttpResponse(response.content, content_type='image/png')
+            except Exception as e:
+                logger.warning(f"Failed to fetch graph via multiport bits: {str(e)}. Trying fallback...")
         
+        # 2. Fallback: Try device-specific port graph using matched name or NetBox name
+        librenms_ifname = target_port.get('ifName') if target_port else interface.name
+        # Fallback to key checks if ifName is missing
+        if not librenms_ifname and target_port:
+            for key in ['ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
+                if target_port.get(key):
+                    librenms_ifname = target_port.get(key)
+                    break
+        if not librenms_ifname:
+            librenms_ifname = interface.name
+            
+        import urllib.parse
+        ifname_encoded = urllib.parse.quote(librenms_ifname, safe='')
+        endpoint = f"devices/{device_id}/ports/{ifname_encoded}/port_bits"
         try:
-            # Call LibreNMS API
+            logger.info(f"Attempting fallback to device port endpoint: {endpoint}")
             response = client._request('GET', endpoint, params={'from': from_val}, stream=True)
             return HttpResponse(response.content, content_type='image/png')
         except Exception as e:
+            logger.error(f"Failed to fetch graph via device port endpoint: {str(e)}")
             return HttpResponse(f"Error fetching graph: {str(e)}", status=500)
 
 
