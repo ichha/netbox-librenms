@@ -1,0 +1,112 @@
+<style>
+    /* Styling for premium LibreNMS integration */
+    .librenms-graph-card {
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        margin-bottom: 24px;
+        background: #fff;
+        overflow: hidden;
+    }
+    .librenms-graph-card-header {
+        background: linear-gradient(135deg, #1f4068, #162447);
+        color: #fff;
+        padding: 14px 20px;
+        font-weight: 600;
+        font-size: 1.1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .librenms-status-pulse {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    .status-up {
+        background-color: #2ed573;
+        box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7);
+        animation: pulse-green 2s infinite;
+    }
+    @keyframes pulse-green {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(46, 213, 115, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0); }
+    }
+    .graph-container {
+        padding: 16px;
+        text-align: center;
+        background: #fafafa;
+        border-top: 1px solid #eee;
+    }
+    .graph-controls {
+        display: flex;
+        gap: 6px;
+        justify-content: center;
+    }
+    .graph-btn {
+        background-color: rgba(255, 255, 255, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: rgba(255, 255, 255, 0.9);
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .graph-btn.active, .graph-btn:hover {
+        background-color: #fff;
+        color: #1f4068;
+        border-color: #fff;
+        font-weight: 500;
+    }
+    .graph-img-wrapper {
+        min-height: 200px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        border-radius: 6px;
+        border: 1px solid #eee;
+        padding: 8px;
+    }
+</style>
+
+<div class="card librenms-graph-card">
+    <div class="librenms-graph-card-header">
+        <div class="d-flex align-items-center">
+            <span class="librenms-status-pulse status-up"></span>
+            <span>LibreNMS Interface Traffic</span>
+        </div>
+        <div class="graph-controls">
+            <button class="graph-btn active" onclick="updateInterfaceGraph('24h', this)">Last 24 Hours</button>
+            <button class="graph-btn" onclick="updateInterfaceGraph('48h', this)">Last 48 Hours</button>
+            <button class="graph-btn" onclick="updateInterfaceGraph('7d', this)">Last 7 Days</button>
+            <button class="graph-btn" onclick="updateInterfaceGraph('30d', this)">Last 30 Days</button>
+            <button class="graph-btn" onclick="updateInterfaceGraph('1y', this)">Last 1 Year</button>
+        </div>
+    </div>
+    
+    <div class="graph-container">
+        <div class="graph-img-wrapper">
+            <img id="librenms-interface-graph-img" src="{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}?range=24h" alt="Interface Traffic Graph" class="img-fluid" />
+        </div>
+    </div>
+</div>
+
+<script>
+    function updateInterfaceGraph(range, btn) {
+        var img = document.getElementById('librenms-interface-graph-img');
+        if (img) {
+            var baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
+            img.src = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
+        }
+        var buttons = btn.parentElement.getElementsByClassName('graph-btn');
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].classList.remove('active');
+        }
+        btn.classList.add('active');
+    }
+</script>

@@ -707,3 +707,47 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
         return HttpResponseRedirect(request.path)
 
 
+from django.views import View
+from django.http import HttpResponse, Http404
+
+class InterfaceLibreNMSGraphView(View):
+    def get(self, request, pk):
+        try:
+            interface = Interface.objects.get(pk=pk)
+        except Interface.DoesNotExist:
+            raise Http404("Interface not found")
+            
+        client = LibreNMSClient()
+        if not client.is_configured():
+            return HttpResponse("LibreNMS not configured", status=500)
+            
+        librenms_device = get_librenms_device(client, interface.device)
+        if not librenms_device:
+            return HttpResponse("Device not found in LibreNMS", status=404)
+            
+        device_id = librenms_device.get('device_id')
+        
+        # Translate time range query parameter to 'from' parameter
+        time_range = request.GET.get('range', '24h')
+        range_map = {
+            '24h': '-1d',
+            '48h': '-2d',
+            '7d': '-7d',
+            '30d': '-30d',
+            '1y': '-1y',
+        }
+        from_val = range_map.get(time_range, '-1d')
+        
+        import urllib.parse
+        ifname_encoded = urllib.parse.quote(interface.name, safe='')
+        endpoint = f"devices/{device_id}/ports/{ifname_encoded}/port_bits"
+        
+        try:
+            # Call LibreNMS API
+            response = client._request('GET', endpoint, params={'from': from_val}, stream=True)
+            return HttpResponse(response.content, content_type='image/png')
+        except Exception as e:
+            return HttpResponse(f"Error fetching graph: {str(e)}", status=500)
+
+
+
