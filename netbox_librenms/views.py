@@ -576,20 +576,78 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
         
         for item in selected_cables:
             try:
-                local_id, remote_id = item.split(':')
-                local_iface = Interface.objects.filter(pk=local_id).first()
-                remote_iface = Interface.objects.filter(pk=remote_id).first()
-                
-                if not local_iface or not remote_iface:
-                    errors.append(f"Interface not found: {item}")
+                parts = item.split(':::')
+                if len(parts) < 4:
+                    errors.append(f"Invalid cable selection format: {item}")
                     continue
                     
-                # Double check cable existence to prevent race conditions
+                local_port = parts[0]
+                remote_name = parts[1]
+                remote_ip = parts[2]
+                remote_port = parts[3]
+                
+                # 1. Resolve local interface (create if missing)
+                local_iface = device.interfaces.filter(name__iexact=local_port).first()
+                if not local_iface:
+                    # Simple type mapping by name
+                    name_lower = local_port.lower()
+                    if any(x in name_lower for x in ['loopback', 'lo0', 'lo.']):
+                        iftype = 'virtual'
+                    elif any(x in name_lower for x in ['tunnel', 'tun']):
+                        iftype = 'virtual'
+                    elif 'null' in name_lower:
+                        iftype = 'virtual'
+                    elif any(x in name_lower for x in ['bundle-ether', 'bundle', 'be']):
+                        iftype = 'virtual'
+                    else:
+                        iftype = 'other'
+                        
+                    local_iface = Interface.objects.create(
+                        device=device,
+                        name=local_port,
+                        type=iftype,
+                        enabled=True
+                    )
+                
+                # 2. Resolve remote device
+                remote_device = find_netbox_device_by_name_or_ip(remote_name, remote_ip)
+                if not remote_device:
+                    errors.append(f"Remote device '{remote_name}' ({remote_ip}) not found in NetBox. Please create the device first.")
+                    continue
+                    
+                # 3. Resolve remote interface (create if missing)
+                remote_iface = remote_device.interfaces.filter(name__iexact=remote_port).first()
+                if not remote_iface:
+                    cleaned_remote_port = remote_port.split('(')[0].strip()
+                    remote_iface = remote_device.interfaces.filter(name__iexact=cleaned_remote_port).first()
+                    
+                if not remote_iface:
+                    cleaned_remote_port = remote_port.split('(')[0].strip()
+                    name_lower = remote_port.lower()
+                    if any(x in name_lower for x in ['loopback', 'lo0', 'lo.']):
+                        iftype = 'virtual'
+                    elif any(x in name_lower for x in ['tunnel', 'tun']):
+                        iftype = 'virtual'
+                    elif 'null' in name_lower:
+                        iftype = 'virtual'
+                    elif any(x in name_lower for x in ['bundle-ether', 'bundle', 'be']):
+                        iftype = 'virtual'
+                    else:
+                        iftype = 'other'
+                        
+                    remote_iface = Interface.objects.create(
+                        device=remote_device,
+                        name=cleaned_remote_port if cleaned_remote_port else remote_port,
+                        type=iftype,
+                        enabled=True
+                    )
+                    
+                # 4. Check if cable already exists on either endpoint
                 if local_iface.cable is not None:
                     errors.append(f"Interface {local_iface.name} already has a cable connection.")
                     continue
                 if remote_iface.cable is not None:
-                    errors.append(f"Interface {remote_iface.name} on remote device {remote_iface.device.name} already has a cable connection.")
+                    errors.append(f"Interface {remote_iface.name} on remote device {remote_device.name} already has a cable connection.")
                     continue
                 
                 with transaction.atomic():
@@ -625,4 +683,5 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
             messages.error(request, err)
             
         return HttpResponseRedirect(request.path)
+
 

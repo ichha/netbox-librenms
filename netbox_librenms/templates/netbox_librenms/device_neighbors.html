@@ -138,14 +138,8 @@
                                             <td style="text-align: center; vertical-align: middle;">
                                                 {% if nb.cable_exists %}
                                                     <span class="badge bg-success">Added</span>
-                                                {% elif nb.local_interface_id and nb.remote_interface_id %}
-                                                    <input type="checkbox" name="selected_cables" value="{{ nb.local_interface_id }}:{{ nb.remote_interface_id }}" class="cable-checkbox">
-                                                {% elif not nb.local_interface_id %}
-                                                    <span class="badge bg-danger" style="font-size: 0.75rem;" title="Local interface does not exist in NetBox">No Local Port</span>
-                                                {% elif not nb.remote_device_id %}
-                                                    <span class="badge bg-secondary" style="font-size: 0.75rem;" title="Remote device not found in NetBox">Unmapped Device</span>
                                                 {% else %}
-                                                    <span class="badge bg-warning" style="font-size: 0.75rem;" title="Remote interface does not exist in NetBox">No Remote Port</span>
+                                                    <input type="checkbox" name="selected_cables" value="{{ nb.local_port }}:::{{ nb.remote_device_name }}:::{{ nb.remote_device_ip }}:::{{ nb.remote_port }}" class="cable-checkbox">
                                                 {% endif %}
                                             </td>
                                         </tr>
