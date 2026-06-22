@@ -107,8 +107,6 @@
                                         <th>Description</th>
                                         <th>Neighbor Device</th>
                                         <th>Neighbor Port</th>
-                                        <th>Match Status</th>
-                                        <th>Actions</th>
                                         <th style="width: 100px; text-align: center;">Select</th>
                                     </tr>
                                 </thead>
@@ -137,27 +135,6 @@
                                                 {% endif %}
                                             </td>
                                             <td>{{ nb.remote_port }}</td>
-                                            <td>
-                                                {% if nb.netbox_url %}
-                                                    <span class="badge bg-success">NetBox Match</span>
-                                                {% else %}
-                                                    <span class="badge bg-secondary">Unmapped</span>
-                                                {% endif %}
-                                            </td>
-                                            <td>
-                                                <div class="d-flex gap-1 justify-content-center">
-                                                    {% if nb.netbox_url %}
-                                                        <a href="{{ nb.netbox_url }}" class="btn btn-xs btn-primary">
-                                                            Open NetBox
-                                                        </a>
-                                                    {% endif %}
-                                                    {% if nb.librenms_url %}
-                                                        <a href="{{ nb.librenms_url }}" target="_blank" class="btn btn-xs btn-outline-secondary">
-                                                            Open LibreNMS
-                                                        </a>
-                                                    {% endif %}
-                                                </div>
-                                            </td>
                                             <td style="text-align: center; vertical-align: middle;">
                                                 {% if nb.cable_exists %}
                                                     <span class="badge bg-success">Added</span>
