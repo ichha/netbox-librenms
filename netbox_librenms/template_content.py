@@ -5,7 +5,7 @@ from .views import get_librenms_device
 class InterfaceTrafficGraphExtension(PluginTemplateExtension):
     models = ['dcim.interface']
 
-    def left_page(self):
+    def right_page(self):
         interface = self.context['object']
         client = LibreNMSClient()
         if not client.is_configured():

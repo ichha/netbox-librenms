@@ -710,6 +710,47 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
 from django.views import View
 from django.http import HttpResponse, Http404
 
+def match_interface_to_port(netbox_iface_name, port_list):
+    # Normalize name: lowercase and strip spaces
+    nb_name = netbox_iface_name.lower().strip()
+    
+    # 1. Exact match on ifName or ifDescr
+    for p in port_list:
+        ifname = (p.get('ifName') or '').lower().strip()
+        ifdescr = (p.get('ifDescr') or '').lower().strip()
+        if nb_name == ifname or nb_name == ifdescr:
+            return p
+            
+    # 2. Try matching cleaned/shortened names (e.g. GigabitEthernet0/1 -> gi0/1)
+    abbrevs = {
+        'gigabitethernet': 'gi',
+        'fastethernet': 'fa',
+        'ethernet': 'et',
+        'hundredgigabitethernet': 'hu',
+        'fiftygigabitethernet': 'fi',
+        'tengigabitethernet': 'te',
+        'fortygigabitethernet': 'fo',
+        'loopback': 'lo',
+        'vlan': 'vl',
+        'port-channel': 'po',
+        'bundle-ether': 'be',
+    }
+    
+    def abbreviate(name):
+        for full, short in abbrevs.items():
+            if name.startswith(full):
+                return name.replace(full, short, 1)
+        return name
+        
+    nb_abbrev = abbreviate(nb_name)
+    for p in port_list:
+        ifname = (p.get('ifName') or '').lower().strip()
+        ifdescr = (p.get('ifDescr') or '').lower().strip()
+        if nb_abbrev == abbreviate(ifname) or nb_abbrev == abbreviate(ifdescr):
+            return p
+            
+    return None
+
 class InterfaceLibreNMSGraphView(View):
     def get(self, request, pk):
         try:
@@ -726,6 +767,15 @@ class InterfaceLibreNMSGraphView(View):
             return HttpResponse("Device not found in LibreNMS", status=404)
             
         device_id = librenms_device.get('device_id')
+        ports = client.get_device_ports(device_id)
+        
+        target_port = match_interface_to_port(interface.name, ports)
+        if not target_port:
+            return HttpResponse("Interface not found in LibreNMS", status=404)
+            
+        port_id = target_port.get('port_id')
+        if not port_id:
+            return HttpResponse("Port ID not found in LibreNMS", status=404)
         
         # Translate time range query parameter to 'from' parameter
         time_range = request.GET.get('range', '24h')
@@ -738,9 +788,8 @@ class InterfaceLibreNMSGraphView(View):
         }
         from_val = range_map.get(time_range, '-1d')
         
-        import urllib.parse
-        ifname_encoded = urllib.parse.quote(interface.name, safe='')
-        endpoint = f"devices/{device_id}/ports/{ifname_encoded}/port_bits"
+        # Use multiport bits graph endpoint which accepts port ID and handles slashes/special characters perfectly
+        endpoint = f"portgroups/multiport/bits/{port_id}"
         
         try:
             # Call LibreNMS API
@@ -748,6 +797,7 @@ class InterfaceLibreNMSGraphView(View):
             return HttpResponse(response.content, content_type='image/png')
         except Exception as e:
             return HttpResponse(f"Error fetching graph: {str(e)}", status=500)
+
 
 
 
