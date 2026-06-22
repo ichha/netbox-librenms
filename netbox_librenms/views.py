@@ -41,11 +41,13 @@ def find_netbox_device_by_name_or_ip(name, ip=None):
     Always checks Device based on IP first (matching primary IP or assigned interface IP),
     then falls back to hostname.
     """
+    from django.db.models import Q
+
     # 1. Prioritize IP match across all matching IPAddress objects in the database
     if ip:
         ip_clean = ip.split('/')[0].strip()
         try:
-            ip_addrs = IPAddress.objects.filter(address__host=ip_clean)
+            ip_addrs = IPAddress.objects.filter(Q(address__startswith=f"{ip_clean}/") | Q(address=ip_clean))
             for ip_addr in ip_addrs:
                 # Check if this IP is primary_ip4 or primary_ip6 on any Device
                 dev = Device.objects.filter(primary_ip4=ip_addr).first()
@@ -72,7 +74,7 @@ def find_netbox_device_by_name_or_ip(name, ip=None):
         if is_ip:
             ip_clean = name.split('/')[0].strip()
             try:
-                ip_addrs = IPAddress.objects.filter(address__host=ip_clean)
+                ip_addrs = IPAddress.objects.filter(Q(address__startswith=f"{ip_clean}/") | Q(address=ip_clean))
                 for ip_addr in ip_addrs:
                     dev = Device.objects.filter(primary_ip4=ip_addr).first()
                     if dev:
