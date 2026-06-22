@@ -38,26 +38,9 @@ def get_librenms_device(client, netbox_device):
 def find_netbox_device_by_name_or_ip(name, ip=None):
     """
     Cross-references LLDP neighbor info back to a NetBox device object.
-    Automatically handles case where the hostname is returned as an IP address.
+    Always checks Device based on IP first, then falls back to hostname.
     """
-    if not name:
-        return None
-        
-    # Check if name is actually an IP address
-    is_ip = False
-    if '.' in name or ':' in name:
-        import re
-        if not re.search('[a-zA-Z]', name):
-            is_ip = True
-            
-    if is_ip:
-        ip = name
-        name = None
-
-    if name:
-        dev = Device.objects.filter(name__iexact=name).first()
-        if dev:
-            return dev
+    # 1. Prioritize IP match
     if ip:
         ip_clean = ip.split('/')[0].strip()
         try:
@@ -67,7 +50,32 @@ def find_netbox_device_by_name_or_ip(name, ip=None):
                     return ip_addr.assigned_object.device
         except Exception:
             pass
+
+    # 2. Check if name is actually an IP address
+    if name:
+        is_ip = False
+        if '.' in name or ':' in name:
+            import re
+            if not re.search('[a-zA-Z]', name):
+                is_ip = True
+                
+        if is_ip:
+            ip_clean = name.split('/')[0].strip()
+            try:
+                ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
+                if ip_addr and ip_addr.assigned_object:
+                    if hasattr(ip_addr.assigned_object, 'device'):
+                        return ip_addr.assigned_object.device
+            except Exception:
+                pass
+        else:
+            # 3. Fallback to device name match
+            dev = Device.objects.filter(name__iexact=name).first()
+            if dev:
+                return dev
+                
     return None
+
 
 def format_uptime(seconds):
     """
@@ -437,6 +445,9 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
         # Fetch all links from LibreNMS
         all_links = client.get_links()
         
+        # Pre-fetch local interfaces with their associated cables to avoid N+1 queries
+        local_interfaces = {i.name.lower(): i for i in instance.interfaces.prefetch_related('cable')}
+
         # Filter links belonging to this device
         neighbors = []
         for link in all_links:
@@ -471,7 +482,7 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                     if not remote_platform:
                         remote_platform = device_map[remote_dev_id].get('hardware') or ''
                 
-                # Check if this neighbor exists inside NetBox
+                # Check if this neighbor exists inside NetBox (prioritizing IP matching)
                 nb_device = find_netbox_device_by_name_or_ip(remote_name, remote_ip)
                 nb_url = None
                 if nb_device:
@@ -490,6 +501,27 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                 admin_status = local_port.get('ifAdminStatus') or local_port.get('ifadminstatus') or 'unknown'
                 oper_status = local_port.get('ifOperStatus') or local_port.get('ifoperstatus') or 'unknown'
 
+                # Match local interface
+                local_iface = local_interfaces.get(local_port_name.lower()) if local_port_name else None
+                local_iface_id = local_iface.id if local_iface else None
+                
+                # Match remote interface on nb_device
+                remote_iface = None
+                if nb_device and remote_port and remote_port != 'Unknown':
+                    remote_iface = nb_device.interfaces.filter(name__iexact=remote_port).first()
+                    if not remote_iface:
+                        # Try cleaning remote port name from parenthesis (e.g. "1/1/28 (4cd587785a80)" -> "1/1/28")
+                        cleaned_remote_port = remote_port.split('(')[0].strip()
+                        remote_iface = nb_device.interfaces.filter(name__iexact=cleaned_remote_port).first()
+                remote_iface_id = remote_iface.id if remote_iface else None
+
+                # Check if cable exists on local or remote interface
+                cable_exists = False
+                if local_iface and local_iface.cable is not None:
+                    cable_exists = True
+                elif remote_iface and remote_iface.cable is not None:
+                    cable_exists = True
+
                 neighbors.append({
                     'local_port': local_port_name,
                     'local_descr': descr,
@@ -502,7 +534,11 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                     'remote_platform': remote_platform,
                     'remote_port': remote_port,
                     'netbox_url': nb_url,
-                    'librenms_url': f"{client.base_url}/device/device={link.get('remote_device_id')}" if link.get('remote_device_id') else None
+                    'librenms_url': f"{client.base_url}/device/device={link.get('remote_device_id')}" if link.get('remote_device_id') else None,
+                    'local_interface_id': local_iface_id,
+                    'remote_interface_id': remote_iface_id,
+                    'remote_device_id': nb_device.id if nb_device else None,
+                    'cable_exists': cable_exists
                 })
 
         return {
@@ -512,3 +548,81 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
             'neighbors': neighbors,
             'libre_nms_web_url': f"{client.base_url}/device/device={device_id}/tab=chassis"
         }
+
+    def post(self, request, pk):
+        device = self.get_object(pk=pk)
+        selected_cables = request.POST.getlist('selected_cables')
+        
+        if not selected_cables:
+            messages.warning(request, "No cables selected.")
+            return HttpResponseRedirect(request.path)
+            
+        from django.db import transaction
+        from dcim.models import Cable, CableTermination, Interface
+        
+        # We will import CableStatusChoices if available, or fall back to 'connected' or 'active'
+        try:
+            from dcim.choices import CableStatusChoices
+            status_value = CableStatusChoices.STATUS_CONNECTED
+        except (ImportError, AttributeError):
+            try:
+                from dcim.choices import CableStatusChoices
+                status_value = 'active'
+            except ImportError:
+                status_value = 'connected'
+
+        added_count = 0
+        errors = []
+        
+        for item in selected_cables:
+            try:
+                local_id, remote_id = item.split(':')
+                local_iface = Interface.objects.filter(pk=local_id).first()
+                remote_iface = Interface.objects.filter(pk=remote_id).first()
+                
+                if not local_iface or not remote_iface:
+                    errors.append(f"Interface not found: {item}")
+                    continue
+                    
+                # Double check cable existence to prevent race conditions
+                if local_iface.cable is not None:
+                    errors.append(f"Interface {local_iface.name} already has a cable connection.")
+                    continue
+                if remote_iface.cable is not None:
+                    errors.append(f"Interface {remote_iface.name} on remote device {remote_iface.device.name} already has a cable connection.")
+                    continue
+                
+                with transaction.atomic():
+                    # Create the Cable
+                    try:
+                        cable = Cable.objects.create(status=status_value)
+                    except Exception:
+                        try:
+                            # Try with 'active' status
+                            cable = Cable.objects.create(status='active')
+                        except Exception:
+                            # Try with default
+                            cable = Cable.objects.create()
+                            
+                    CableTermination.objects.create(
+                        cable=cable,
+                        cable_end='A',
+                        termination=local_iface
+                    )
+                    CableTermination.objects.create(
+                        cable=cable,
+                        cable_end='B',
+                        termination=remote_iface
+                    )
+                added_count += 1
+            except Exception as e:
+                errors.append(f"Failed to connect {item}: {str(e)}")
+                
+        if added_count > 0:
+            messages.success(request, f"Successfully created {added_count} cable connections in NetBox.")
+            
+        for err in errors:
+            messages.error(request, err)
+            
+        return HttpResponseRedirect(request.path)
+

@@ -95,84 +95,118 @@
                         View Chassis in LibreNMS ↗
                     </a>
                 </div>
-
-                <div class="table-container">
-                    {% if neighbors %}
-                        <table class="table table-hover table-striped mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Local Interface</th>
-                                    <th>Status (Admin/Oper)</th>
-                                    <th>Description</th>
-                                    <th>Neighbor Device</th>
-                                    <th>Neighbor Port</th>
-                                    <th>Match Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for nb in neighbors %}
+                <form method="post" action="">
+                    {% csrf_token %}
+                    <div class="table-container">
+                        {% if neighbors %}
+                            <table class="table table-hover table-striped mb-0">
+                                <thead>
                                     <tr>
-                                        <td class="font-weight-bold" style="text-align: left;">{{ nb.local_port }}</td>
-                                        <td>
-                                            <span class="status-badge-pill {% if nb.local_admin_status == 'up' and nb.local_oper_status == 'up' %}status-pill-up{% elif nb.local_admin_status == 'down' or nb.local_oper_status == 'down' %}status-pill-down{% else %}status-pill-other{% endif %}">
-                                                {{ nb.local_admin_status }}/{{ nb.local_oper_status }}
-                                            </span>
-                                        </td>
-                                        <td class="port-descr" style="text-align: left; font-size: 0.9rem;">{{ nb.local_descr|default:"-" }}</td>
-                                        <td style="text-align: left;">
-                                            {% if nb.netbox_url %}
-                                                <a href="{{ nb.netbox_url }}" class="font-weight-bold" style="display: block;">
-                                                    {{ nb.remote_device_ip|default:nb.remote_device_name }}
-                                                </a>
-                                            {% else %}
-                                                <span class="font-weight-bold" style="display: block;">
-                                                    {{ nb.remote_device_ip|default:nb.remote_device_name }}
-                                                </span>
-                                            {% endif %}
-                                            {% if nb.remote_platform %}
-                                                <small class="text-muted">{{ nb.remote_platform }}</small>
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ nb.remote_port }}</td>
-                                        <td>
-                                            {% if nb.netbox_url %}
-                                                <span class="badge bg-success">NetBox Match</span>
-                                            {% else %}
-                                                <span class="badge bg-secondary">Unmapped</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <div class="d-flex gap-1 justify-content-center">
-                                                {% if nb.netbox_url %}
-                                                    <a href="{{ nb.netbox_url }}" class="btn btn-xs btn-primary">
-                                                        Open NetBox
-                                                    </a>
-                                                {% endif %}
-                                                {% if nb.librenms_url %}
-                                                    <a href="{{ nb.librenms_url }}" target="_blank" class="btn btn-xs btn-outline-secondary">
-                                                        Open LibreNMS
-                                                    </a>
-                                                {% endif %}
-                                            </div>
-                                        </td>
+                                        <th>Local Interface</th>
+                                        <th>Status (Admin/Oper)</th>
+                                        <th>Description</th>
+                                        <th>Neighbor Device</th>
+                                        <th>Neighbor Port</th>
+                                        <th>Match Status</th>
+                                        <th>Actions</th>
+                                        <th style="width: 100px; text-align: center;">Select</th>
                                     </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    {% else %}
-                        <div class="no-neighbors">
-                            <span class="no-neighbors-icon">🔗</span>
-                            <h4>No Neighbors Discovered</h4>
-                            <p class="text-muted">
-                                LibreNMS has not discovered any LLDP, CDP, or FDP neighbors for this device.
-                            </p>
-                        </div>
-                    {% endif %}
-                </div>
+                                </thead>
+                                <tbody>
+                                    {% for nb in neighbors %}
+                                        <tr>
+                                            <td class="font-weight-bold" style="text-align: left;">{{ nb.local_port }}</td>
+                                            <td>
+                                                <span class="status-badge-pill {% if nb.local_admin_status == 'up' and nb.local_oper_status == 'up' %}status-pill-up{% elif nb.local_admin_status == 'down' or nb.local_oper_status == 'down' %}status-pill-down{% else %}status-pill-other{% endif %}">
+                                                    {{ nb.local_admin_status }}/{{ nb.local_oper_status }}
+                                                </span>
+                                            </td>
+                                            <td class="port-descr" style="text-align: left; font-size: 0.9rem;">{{ nb.local_descr|default:"-" }}</td>
+                                            <td style="text-align: left;">
+                                                {% if nb.netbox_url %}
+                                                    <a href="{{ nb.netbox_url }}" class="font-weight-bold" style="display: block;">
+                                                        {{ nb.remote_device_ip|default:nb.remote_device_name }}
+                                                    </a>
+                                                {% else %}
+                                                    <span class="font-weight-bold" style="display: block;">
+                                                        {{ nb.remote_device_ip|default:nb.remote_device_name }}
+                                                    </span>
+                                                {% endif %}
+                                                {% if nb.remote_platform %}
+                                                    <small class="text-muted">{{ nb.remote_platform }}</small>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ nb.remote_port }}</td>
+                                            <td>
+                                                {% if nb.netbox_url %}
+                                                    <span class="badge bg-success">NetBox Match</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary">Unmapped</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <div class="d-flex gap-1 justify-content-center">
+                                                    {% if nb.netbox_url %}
+                                                        <a href="{{ nb.netbox_url }}" class="btn btn-xs btn-primary">
+                                                            Open NetBox
+                                                        </a>
+                                                    {% endif %}
+                                                    {% if nb.librenms_url %}
+                                                        <a href="{{ nb.librenms_url }}" target="_blank" class="btn btn-xs btn-outline-secondary">
+                                                            Open LibreNMS
+                                                        </a>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                            <td style="text-align: center; vertical-align: middle;">
+                                                {% if nb.cable_exists %}
+                                                    <span class="badge bg-success">Added</span>
+                                                {% elif nb.local_interface_id and nb.remote_interface_id %}
+                                                    <input type="checkbox" name="selected_cables" value="{{ nb.local_interface_id }}:{{ nb.remote_interface_id }}" class="cable-checkbox">
+                                                {% elif not nb.local_interface_id %}
+                                                    <span class="badge bg-danger" style="font-size: 0.75rem;" title="Local interface does not exist in NetBox">No Local Port</span>
+                                                {% elif not nb.remote_device_id %}
+                                                    <span class="badge bg-secondary" style="font-size: 0.75rem;" title="Remote device not found in NetBox">Unmapped Device</span>
+                                                {% else %}
+                                                    <span class="badge bg-warning" style="font-size: 0.75rem;" title="Remote interface does not exist in NetBox">No Remote Port</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            
+                            <div class="card-footer p-3" style="background-color: #f8f9fa; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                                <div class="form-check">
+                                    <input type="checkbox" id="select-all-checkbox" class="form-check-input" onclick="toggleSelectAll(this)">
+                                    <label for="select-all-checkbox" class="form-check-label font-weight-bold" style="cursor: pointer; user-select: none;">Select All Unadded</label>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    🔌 Connect Selected Cables
+                                </button>
+                            </div>
+                        {% else %}
+                            <div class="no-neighbors">
+                                <span class="no-neighbors-icon">🔗</span>
+                                <h4>No Neighbors Discovered</h4>
+                                <p class="text-muted">
+                                    LibreNMS has not discovered any LLDP, CDP, or FDP neighbors for this device.
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </form>
             </div>
         {% endif %}
     </div>
 </div>
 
+<script>
+    function toggleSelectAll(masterCheckbox) {
+        var checkboxes = document.querySelectorAll('.cable-checkbox');
+        checkboxes.forEach(function(cb) {
+            cb.checked = masterCheckbox.checked;
+        });
+    }
+</script>
 {% endblock content %}
