@@ -38,15 +38,25 @@ def get_librenms_device(client, netbox_device):
 def find_netbox_device_by_name_or_ip(name, ip=None):
     """
     Cross-references LLDP neighbor info back to a NetBox device object.
-    Always checks Device based on IP first, then falls back to hostname.
+    Always checks Device based on IP first (matching primary IP or assigned interface IP),
+    then falls back to hostname.
     """
     # 1. Prioritize IP match
     if ip:
         ip_clean = ip.split('/')[0].strip()
         try:
             ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
-            if ip_addr and ip_addr.assigned_object:
-                if hasattr(ip_addr.assigned_object, 'device'):
+            if ip_addr:
+                # Check if this IP is primary_ip4 or primary_ip6 on any Device
+                dev = Device.objects.filter(primary_ip4=ip_addr).first()
+                if dev:
+                    return dev
+                dev = Device.objects.filter(primary_ip6=ip_addr).first()
+                if dev:
+                    return dev
+                
+                # Check if this IP is assigned to an interface of a Device
+                if ip_addr.assigned_object and hasattr(ip_addr.assigned_object, 'device'):
                     return ip_addr.assigned_object.device
         except Exception:
             pass
@@ -63,8 +73,14 @@ def find_netbox_device_by_name_or_ip(name, ip=None):
             ip_clean = name.split('/')[0].strip()
             try:
                 ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
-                if ip_addr and ip_addr.assigned_object:
-                    if hasattr(ip_addr.assigned_object, 'device'):
+                if ip_addr:
+                    dev = Device.objects.filter(primary_ip4=ip_addr).first()
+                    if dev:
+                        return dev
+                    dev = Device.objects.filter(primary_ip6=ip_addr).first()
+                    if dev:
+                        return dev
+                    if ip_addr.assigned_object and hasattr(ip_addr.assigned_object, 'device'):
                         return ip_addr.assigned_object.device
             except Exception:
                 pass
