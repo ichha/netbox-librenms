@@ -690,6 +690,10 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
                         cable_end='B',
                         termination=remote_iface
                     )
+                    
+                    # Force NetBox to rebuild paths for this cable
+                    cable._terminations_modified = True
+                    cable.save()
                 added_count += 1
             except Exception as e:
                 errors.append(f"Failed to connect {item}: {str(e)}")
