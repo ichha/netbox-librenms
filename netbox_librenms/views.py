@@ -41,12 +41,12 @@ def find_netbox_device_by_name_or_ip(name, ip=None):
     Always checks Device based on IP first (matching primary IP or assigned interface IP),
     then falls back to hostname.
     """
-    # 1. Prioritize IP match
+    # 1. Prioritize IP match across all matching IPAddress objects in the database
     if ip:
         ip_clean = ip.split('/')[0].strip()
         try:
-            ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
-            if ip_addr:
+            ip_addrs = IPAddress.objects.filter(address__host=ip_clean)
+            for ip_addr in ip_addrs:
                 # Check if this IP is primary_ip4 or primary_ip6 on any Device
                 dev = Device.objects.filter(primary_ip4=ip_addr).first()
                 if dev:
@@ -72,8 +72,8 @@ def find_netbox_device_by_name_or_ip(name, ip=None):
         if is_ip:
             ip_clean = name.split('/')[0].strip()
             try:
-                ip_addr = IPAddress.objects.filter(address__host=ip_clean).first()
-                if ip_addr:
+                ip_addrs = IPAddress.objects.filter(address__host=ip_clean)
+                for ip_addr in ip_addrs:
                     dev = Device.objects.filter(primary_ip4=ip_addr).first()
                     if dev:
                         return dev
