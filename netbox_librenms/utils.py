@@ -171,3 +171,150 @@ class LibreNMSClient:
             'height': 200,
         }
         return self._request('GET', endpoint, params=params, stream=True)
+
+    def _normalize_interface_name(self, name):
+        if not name:
+            return ""
+        n = name.lower().strip()
+        n = "".join(c for c in n if c.isalnum() or c == '/')
+        
+        prefixes = {
+            "hundredgigabitethernet": "hu",
+            "hundredgige": "hu",
+            "fortygigabitethernet": "fo",
+            "fortygige": "fo",
+            "fiftygigabitethernet": "fi",
+            "fiftygige": "fi",
+            "tengigabitethernet": "te",
+            "tengige": "te",
+            "gigabitethernet": "ge",
+            "fastethernet": "fa",
+            "ethernet": "eth",
+            "portchannel": "po",
+            "loopback": "lo",
+            "vlan": "vl",
+            "gi": "ge",
+        }
+        for full, short in prefixes.items():
+            if n.startswith(full):
+                n = short + n[len(full):]
+                break
+        return n
+
+    def _parse_rate_str_to_bps(self, rate_str):
+        try:
+            parts = rate_str.strip().split()
+            if not parts:
+                return 0.0
+            value = float(parts[0])
+            if len(parts) > 1:
+                unit = parts[1].lower()
+                if "gbps" in unit:
+                    value *= 1e9
+                elif "mbps" in unit:
+                    value *= 1e6
+                elif "kbps" in unit:
+                    value *= 1e3
+            return value
+        except Exception as e:
+            logger.warning(f"Failed to parse rate string '{rate_str}': {str(e)}")
+            return 0.0
+
+    def get_port_statistics(self, device_id, port_name):
+        columns = "port_id,ifSpeed,ifName,ifDescr,ifAlias,ifInOctets_rate,ifOutOctets_rate"
+        res = self._request('GET', f"devices/{device_id}/ports", params={'columns': columns})
+        ports = res.get("ports", []) if isinstance(res, dict) else []
+        
+        matched_port = None
+        target_norm = self._normalize_interface_name(port_name)
+        
+        for port in ports:
+            ifName_norm = self._normalize_interface_name(port.get("ifName"))
+            ifDescr_norm = self._normalize_interface_name(port.get("ifDescr"))
+            if target_norm == ifName_norm or target_norm == ifDescr_norm:
+                matched_port = port
+                break
+                
+        if not matched_port:
+            for port in ports:
+                ifAlias_norm = self._normalize_interface_name(port.get("ifAlias"))
+                if target_norm == ifAlias_norm:
+                    matched_port = port
+                    break
+
+        if not matched_port:
+            for port in ports:
+                ifName_norm = self._normalize_interface_name(port.get("ifName"))
+                ifDescr_norm = self._normalize_interface_name(port.get("ifDescr"))
+                
+                if ifName_norm and ifName_norm.startswith(target_norm):
+                    matched_port = port
+                    break
+                if ifDescr_norm and ifDescr_norm.startswith(target_norm):
+                    matched_port = port
+                    break
+                    
+        if not matched_port:
+            logger.warning(f"Port '{port_name}' not found for device '{device_id}' in LibreNMS.")
+            return None
+            
+        in_octets_rate = matched_port.get("ifInOctets_rate")
+        out_octets_rate = matched_port.get("ifOutOctets_rate")
+        
+        in_bps = 0.0
+        out_bps = 0.0
+        
+        if in_octets_rate is not None:
+            try:
+                in_bps = float(in_octets_rate) * 8
+            except (ValueError, TypeError):
+                pass
+        else:
+            in_rate_str = matched_port.get("in_rate")
+            if in_rate_str:
+                in_bps = self._parse_rate_str_to_bps(in_rate_str)
+                
+        if out_octets_rate is not None:
+            try:
+                out_bps = float(out_octets_rate) * 8
+            except (ValueError, TypeError):
+                pass
+        else:
+            out_rate_str = matched_port.get("out_rate")
+            if out_rate_str:
+                out_bps = self._parse_rate_str_to_bps(out_rate_str)
+                
+        return {
+            "in_bps": in_bps,
+            "out_bps": out_bps,
+            "port_id": matched_port.get("port_id"),
+            "ifSpeed": matched_port.get("ifSpeed")
+        }
+
+    def get_port_graph_image(self, device_id, port_name, time_range, double_encode=False, width=1100, height=300):
+        range_map = {
+            "1d": "-1d",
+            "2d": "-2d",
+            "7d": "-7d",
+            "30d": "-30d",
+            "1y": "-1y"
+        }
+        from_time = range_map.get(time_range, "-1d")
+        
+        import urllib.parse
+        encoded_port = urllib.parse.quote(port_name, safe='')
+        if double_encode:
+            encoded_port = urllib.parse.quote(encoded_port, safe='')
+            
+        endpoint = f"devices/{urllib.parse.quote(str(device_id), safe='')}/ports/{encoded_port}/port_bits"
+        
+        params = {
+            "from": from_time,
+            "width": width,
+            "height": height,
+            'inverse': '0',
+            'stacked': '1',
+            'graph_stacked': '1',
+        }
+        
+        return self._request('GET', endpoint, params=params, stream=True)
