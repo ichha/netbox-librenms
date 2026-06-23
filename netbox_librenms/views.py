@@ -710,10 +710,46 @@ class DeviceLibreNMSNeighborsView(generic.ObjectView):
 from django.views import View
 from django.http import HttpResponse, Http404
 
-def match_interface_to_port(netbox_iface_name, port_list):
-    nb_name = netbox_iface_name.lower().strip()
+def normalize_interface_name(name):
+    if not name:
+        return ""
+    # Lowercase and strip whitespace
+    n = name.lower().strip()
+    # Remove all spaces and special punctuation except forward slashes
+    n = "".join(c for c in n if c.isalnum() or c == '/')
     
-    # 1. First pass: exact match on any name key or ifDescr key
+    # Standardize common interface name prefixes to their standard short versions
+    prefixes = {
+        "hundredgigabitethernet": "hu",
+        "hundredgige": "hu",
+        "fortygigabitethernet": "fo",
+        "fortygige": "fo",
+        "fiftygigabitethernet": "fi",
+        "fiftygige": "fi",
+        "tengigabitethernet": "te",
+        "tengige": "te",
+        "gigabitethernet": "ge",
+        "gige": "ge",
+        "fastethernet": "fa",
+        "ethernet": "eth",
+        "portchannel": "po",
+        "port-channel": "po",
+        "loopback": "lo",
+        "vlan": "vl",
+        "gi": "ge", # Map gi -> ge for consistency
+    }
+    for full, short in prefixes.items():
+        if n.startswith(full):
+            n = short + n[len(full):]
+            break
+    return n
+
+def match_interface_to_port(netbox_iface_name, port_list):
+    if not netbox_iface_name:
+        return None
+
+    # First try exact case-insensitive match on Name/Description keys
+    nb_name = netbox_iface_name.lower().strip()
     for p in port_list:
         names = []
         for key in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
@@ -722,13 +758,39 @@ def match_interface_to_port(netbox_iface_name, port_list):
                 names.append(str(val).lower().strip())
         if nb_name in names:
             return p
-            
-    # 2. Second pass: Try matching cleaned/shortened names (e.g. GigabitEthernet0/1 -> gi0/1)
+
+    # Second pass: normalize names and try matching
+    target_norm = normalize_interface_name(netbox_iface_name)
+    
+    # Try exact normalized match
+    for p in port_list:
+        for key in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
+            val = p.get(key)
+            if val and normalize_interface_name(str(val)) == target_norm:
+                return p
+
+    # Try exact normalized match on ifAlias (Description)
+    for p in port_list:
+        val = p.get('ifAlias') or p.get('ifalias')
+        if val and normalize_interface_name(str(val)) == target_norm:
+            return p
+
+    # Try prefix match (e.g. database description starts with target)
+    for p in port_list:
+        for key in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
+            val = p.get(key)
+            if val:
+                val_norm = normalize_interface_name(str(val))
+                if val_norm and val_norm.startswith(target_norm):
+                    return p
+                    
+    # Try abbreviation fallback check
     abbrevs = {
         'gigabitethernet': 'gi',
         'fastethernet': 'fa',
         'ethernet': 'et',
         'hundredgigabitethernet': 'hu',
+        'hundredgige': 'hu',
         'fiftygigabitethernet': 'fi',
         'tengigabitethernet': 'te',
         'fortygigabitethernet': 'fo',
@@ -737,7 +799,6 @@ def match_interface_to_port(netbox_iface_name, port_list):
         'port-channel': 'po',
         'bundle-ether': 'be',
     }
-    
     def abbreviate(name):
         for full, short in abbrevs.items():
             if name.startswith(full):
@@ -754,7 +815,7 @@ def match_interface_to_port(netbox_iface_name, port_list):
         for name in names:
             if nb_abbrev == abbreviate(name):
                 return p
-                
+
     return None
 
 class InterfaceLibreNMSGraphView(View):
