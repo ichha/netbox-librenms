@@ -870,14 +870,33 @@ class InterfaceLibreNMSGraphView(View):
         if height:
             api_params['height'] = height
 
+        def validate_and_get_image(endpoint, params):
+            """
+            Requests the endpoint, validates that it returned a valid image,
+            and returns the content and content-type. Raises ValueError on non-image response.
+            """
+            response = client._request('GET', endpoint, params=params, stream=True)
+            content_type = response.headers.get("content-type", "").lower()
+            
+            # If the response is JSON or not an image, it indicates an error or incorrect format
+            if "image/" not in content_type:
+                try:
+                    data = response.json()
+                    err_msg = data.get("message") or data.get("error") or f"Invalid response format: {content_type}"
+                except Exception:
+                    err_msg = f"Non-image response ({content_type}): {response.text[:200]}"
+                raise ValueError(err_msg)
+                
+            return response.content, content_type
+
         # 1. Try port ID first if target_port exists (very reliable, avoids name encoding issues)
         if target_port and target_port.get('port_id'):
             port_id = target_port.get('port_id')
             endpoint = f"ports/{port_id}/port_bits"
             try:
                 logger.info(f"Attempting to fetch graph by port ID: {endpoint} with params {api_params}")
-                response = client._request('GET', endpoint, params=api_params, stream=True)
-                return HttpResponse(response.content, content_type='image/png')
+                img_content, content_type = validate_and_get_image(endpoint, api_params)
+                return HttpResponse(img_content, content_type=content_type)
             except Exception as e:
                 logger.warning(f"Failed to fetch graph by port ID: {str(e)}. Trying name-based endpoints...")
 
@@ -898,8 +917,8 @@ class InterfaceLibreNMSGraphView(View):
             ifname_encoded = urllib.parse.quote(librenms_ifname, safe='')
             endpoint = f"devices/{device_id}/ports/{ifname_encoded}/port_bits"
             logger.info(f"Attempting single-encoded fallback to device port endpoint: {endpoint}")
-            response = client._request('GET', endpoint, params=api_params, stream=True)
-            return HttpResponse(response.content, content_type='image/png')
+            img_content, content_type = validate_and_get_image(endpoint, api_params)
+            return HttpResponse(img_content, content_type=content_type)
         except Exception as single_err:
             logger.warning(f"Single encoded port graph query failed: {str(single_err)}. Retrying with double-encoding...")
             
@@ -908,8 +927,8 @@ class InterfaceLibreNMSGraphView(View):
                 ifname_double_encoded = urllib.parse.quote(urllib.parse.quote(librenms_ifname, safe=''), safe='')
                 endpoint = f"devices/{device_id}/ports/{ifname_double_encoded}/port_bits"
                 logger.info(f"Attempting double-encoded fallback to device port endpoint: {endpoint}")
-                response = client._request('GET', endpoint, params=api_params, stream=True)
-                return HttpResponse(response.content, content_type='image/png')
+                img_content, content_type = validate_and_get_image(endpoint, api_params)
+                return HttpResponse(img_content, content_type=content_type)
             except Exception as double_err:
                 err_msg = f"Failed to fetch graph via both single and double encoded routes. Single error: {str(single_err)}. Double error: {str(double_err)}"
                 logger.error(err_msg)
