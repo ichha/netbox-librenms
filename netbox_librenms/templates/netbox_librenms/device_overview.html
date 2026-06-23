@@ -48,28 +48,13 @@
         70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(255, 71, 87, 0); }
         100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
     }
-    .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 20px;
-        padding: 20px;
-    }
-    .metric-item {
-        background: #f8f9fa;
-        border-radius: 8px;
-        padding: 16px;
-        border-left: 4px solid #1f4068;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #6c757d;
-        text-transform: uppercase;
-        margin-bottom: 4px;
-        font-weight: 500;
-    }
-    .metric-value {
-        font-size: 1.1rem;
+    .attr-table th {
+        width: 250px;
         font-weight: 600;
+        color: #555;
+        background: #fdfdfd;
+    }
+    .attr-table td {
         color: #2c3e50;
     }
     .graph-container {
@@ -191,31 +176,77 @@
                     </a>
                 </div>
                 
-                <div class="metrics-grid">
-                    <div class="metric-item">
-                        <div class="metric-label">SNMP SysName</div>
-                        <div class="metric-value">{{ librenms_device.sysName|default:librenms_device.hostname }}</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">LibreNMS ID</div>
-                        <div class="metric-value">#{{ librenms_device.device_id }}</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">IP Address</div>
-                        <div class="metric-value">{{ librenms_device.ip }}</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Uptime</div>
-                        <div class="metric-value">{{ uptime_str }}</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">OS / Hardware</div>
-                        <div class="metric-value">{{ librenms_device.hardware }} ({{ librenms_device.os|upper }})</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Serial Number</div>
-                        <div class="metric-value">{{ librenms_device.serial|default:"N/A" }}</div>
-                    </div>
+                <div class="table-responsive">
+                    <table class="table table-hover attr-table mb-0">
+                        <tbody>
+                            <tr>
+                                <th scope="row">System Name</th>
+                                <td>{{ librenms_device.sysName|default:librenms_device.hostname }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Resolved IP</th>
+                                <td><code>{{ librenms_device.ip|default:librenms_device.hostname }}</code></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Description</th>
+                                <td>{{ librenms_device.sysDescr|default:librenms_device.features|default:librenms_device.purpose|default:object.description|default:"N/A" }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Hardware</th>
+                                <td>{{ librenms_device.hardware|default:"N/A" }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Operating System</th>
+                                <td>{{ librenms_device.os|upper }} {% if librenms_device.version %} (Version {{ librenms_device.version }}){% endif %}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Serial</th>
+                                <td>{{ librenms_device.serial|default:"N/A" }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Object ID</th>
+                                <td><code>{{ librenms_device.sysObjectID|default:"N/A" }}</code></td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Contact</th>
+                                <td>{{ librenms_device.contact|default:"N/A" }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Uptime</th>
+                                <td>{{ uptime_str }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Location</th>
+                                <td>{{ librenms_device.location|default:"N/A" }}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Lat / Lng</th>
+                                <td>
+                                    {% if librenms_device.lat and librenms_device.lng %}
+                                        {{ librenms_device.lat }} / {{ librenms_device.lng }}
+                                    {% else %}
+                                        N/A
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% if librenms_device.last_discovered %}
+                            <tr>
+                                <th scope="row">Last Discovered</th>
+                                <td>{{ librenms_device.last_discovered }}</td>
+                            </tr>
+                            {% endif %}
+                            {% if librenms_device.last_polled %}
+                            <tr>
+                                <th scope="row">Last Polled</th>
+                                <td>{{ librenms_device.last_polled }}</td>
+                            </tr>
+                            {% endif %}
+                            <tr>
+                                <th scope="row">LibreNMS ID</th>
+                                <td><code>#{{ librenms_device.device_id }}</code></td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
