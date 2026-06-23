@@ -59,8 +59,17 @@ class LibreNMSClient:
         try:
             res = self._request('GET', 'devices')
             if res.get('status') == 'ok' and res.get('devices'):
+                target_lower = str(ip_or_name).lower().strip()
                 for dev in res['devices']:
-                    if str(dev.get('ip')) == str(ip_or_name) or str(dev.get('hostname')) == str(ip_or_name):
+                    hostname = str(dev.get('hostname') or '').lower().strip()
+                    sysname = str(dev.get('sysName') or '').lower().strip()
+                    display = str(dev.get('display') or '').lower().strip()
+                    ip = str(dev.get('ip') or '').lower().strip()
+                    
+                    if (target_lower == hostname or 
+                        target_lower == sysname or 
+                        target_lower == display or 
+                        target_lower == ip):
                         return dev
         except Exception:
             pass

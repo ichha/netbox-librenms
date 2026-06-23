@@ -795,23 +795,33 @@ class InterfaceLibreNMSGraphView(View):
             '7d': '-7d',
             '30d': '-30d',
             '1y': '-1y',
+            '1d': '-1d',
+            '2d': '-2d',
         }
         from_val = range_map.get(time_range, '-1d')
         
-        # 1. Try multiport bits by port ID first if found (helps bypass URL encoding web server limitations)
+        # Prepare query parameters (dimensions and range)
+        width = request.GET.get('width')
+        height = request.GET.get('height')
+        api_params = {'from': from_val}
+        if width:
+            api_params['width'] = width
+        if height:
+            api_params['height'] = height
+
+        # 1. Try port ID first if target_port exists (very reliable, avoids name encoding issues)
         if target_port and target_port.get('port_id'):
             port_id = target_port.get('port_id')
-            endpoint = f"portgroups/multiport/bits/{port_id}"
+            endpoint = f"ports/{port_id}/port_bits"
             try:
-                logger.info(f"Attempting to fetch graph via multiport bits endpoint: {endpoint}")
-                response = client._request('GET', endpoint, params={'from': from_val}, stream=True)
+                logger.info(f"Attempting to fetch graph by port ID: {endpoint} with params {api_params}")
+                response = client._request('GET', endpoint, params=api_params, stream=True)
                 return HttpResponse(response.content, content_type='image/png')
             except Exception as e:
-                logger.warning(f"Failed to fetch graph via multiport bits: {str(e)}. Trying fallback...")
-        
-        # 2. Fallback: Try device-specific port graph using matched name or NetBox name
+                logger.warning(f"Failed to fetch graph by port ID: {str(e)}. Trying name-based endpoints...")
+
+        # Resolve interface name to use
         librenms_ifname = target_port.get('ifName') if target_port else interface.name
-        # Fallback to key checks if ifName is missing
         if not librenms_ifname and target_port:
             for key in ['ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
                 if target_port.get(key):
@@ -821,15 +831,28 @@ class InterfaceLibreNMSGraphView(View):
             librenms_ifname = interface.name
             
         import urllib.parse
-        ifname_encoded = urllib.parse.quote(librenms_ifname, safe='')
-        endpoint = f"devices/{device_id}/ports/{ifname_encoded}/port_bits"
+        
+        # 2. Try single-encoded name route
         try:
-            logger.info(f"Attempting fallback to device port endpoint: {endpoint}")
-            response = client._request('GET', endpoint, params={'from': from_val}, stream=True)
+            ifname_encoded = urllib.parse.quote(librenms_ifname, safe='')
+            endpoint = f"devices/{device_id}/ports/{ifname_encoded}/port_bits"
+            logger.info(f"Attempting single-encoded fallback to device port endpoint: {endpoint}")
+            response = client._request('GET', endpoint, params=api_params, stream=True)
             return HttpResponse(response.content, content_type='image/png')
-        except Exception as e:
-            logger.error(f"Failed to fetch graph via device port endpoint: {str(e)}")
-            return HttpResponse(f"Error fetching graph: {str(e)}", status=500)
+        except Exception as single_err:
+            logger.warning(f"Single encoded port graph query failed: {str(single_err)}. Retrying with double-encoding...")
+            
+            # 3. Try double-encoded name route
+            try:
+                ifname_double_encoded = urllib.parse.quote(urllib.parse.quote(librenms_ifname, safe=''), safe='')
+                endpoint = f"devices/{device_id}/ports/{ifname_double_encoded}/port_bits"
+                logger.info(f"Attempting double-encoded fallback to device port endpoint: {endpoint}")
+                response = client._request('GET', endpoint, params=api_params, stream=True)
+                return HttpResponse(response.content, content_type='image/png')
+            except Exception as double_err:
+                err_msg = f"Failed to fetch graph via both single and double encoded routes. Single error: {str(single_err)}. Double error: {str(double_err)}"
+                logger.error(err_msg)
+                return HttpResponse(err_msg, status=500, content_type="text/plain")
 
 
 

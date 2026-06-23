@@ -74,39 +74,126 @@
     }
 </style>
 
-<div class="card librenms-graph-card">
+<div class="card librenms-graph-card librenms-traffic-card" id="librenms-traffic-card">
     <div class="librenms-graph-card-header">
         <div class="d-flex align-items-center">
             <span class="librenms-status-pulse status-up"></span>
             <span>LibreNMS Interface Traffic</span>
         </div>
         <div class="graph-controls">
-            <button class="graph-btn active" onclick="updateInterfaceGraph('24h', this)">Last 24 Hours</button>
-            <button class="graph-btn" onclick="updateInterfaceGraph('48h', this)">Last 48 Hours</button>
-            <button class="graph-btn" onclick="updateInterfaceGraph('7d', this)">Last 7 Days</button>
-            <button class="graph-btn" onclick="updateInterfaceGraph('30d', this)">Last 30 Days</button>
-            <button class="graph-btn" onclick="updateInterfaceGraph('1y', this)">Last 1 Year</button>
+            <button class="graph-btn active" data-range="24h">Last 24 Hours</button>
+            <button class="graph-btn" data-range="48h">Last 48 Hours</button>
+            <button class="graph-btn" data-range="7d">Last 7 Days</button>
+            <button class="graph-btn" data-range="30d">Last 30 Days</button>
+            <button class="graph-btn" data-range="1y">Last 1 Year</button>
         </div>
     </div>
     
     <div class="graph-container">
-        <div class="graph-img-wrapper">
-            <img id="librenms-interface-graph-img" src="{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}?range=24h" alt="Interface Traffic Graph" class="img-fluid" />
+        <!-- Loading Spinner -->
+        <div id="librenms-loading" class="d-flex flex-column justify-content-center align-items-center py-5">
+            <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <span class="mt-3 text-muted fw-semibold">Querying LibreNMS for interface graph...</span>
+        </div>
+
+        <!-- Error Alert -->
+        <div id="librenms-error" class="alert alert-warning d-none text-start" role="alert">
+            <h5 class="alert-heading fw-bold d-flex align-items-center gap-2">
+                <i class="mdi mdi-alert-circle"></i> LibreNMS Mapping Warning
+            </h5>
+            <p id="librenms-error-msg" class="mb-0">Failed to load LibreNMS graph.</p>
+        </div>
+
+        <!-- Graph Image Wrapper -->
+        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none">
+            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto;" />
         </div>
     </div>
 </div>
 
 <script>
-    function updateInterfaceGraph(range, btn) {
-        var img = document.getElementById('librenms-interface-graph-img');
-        if (img) {
-            var baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
-            img.src = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
+    (function() {
+        // De-duplicate the card if NetBox renders it on multiple injection hooks
+        const cards = document.querySelectorAll('.librenms-traffic-card');
+        if (cards.length > 1) {
+            for (let i = 1; i < cards.length; i++) {
+                cards[i].remove();
+            }
         }
-        var buttons = btn.parentElement.getElementsByClassName('graph-btn');
-        for (var i = 0; i < buttons.length; i++) {
-            buttons[i].classList.remove('active');
+
+        const cardEl = document.getElementById("librenms-traffic-card");
+        if (cardEl) {
+            // Reposition card to the top of the interface details container
+            const targetContainer = document.querySelector(".tab-pane.active") || 
+                                    document.querySelector(".tab-content") || 
+                                    document.querySelector(".col-md-9") || 
+                                    document.querySelector(".col-12") ||
+                                    document.querySelector(".content-body") || 
+                                    document.querySelector("main");
+            if (targetContainer && cardEl.parentElement !== targetContainer) {
+                targetContainer.insertBefore(cardEl, targetContainer.firstChild);
+            }
         }
-        btn.classList.add('active');
-    }
+
+        const imgEl = document.getElementById('librenms-interface-graph-img');
+        const loadingEl = document.getElementById('librenms-loading');
+        const errorEl = document.getElementById('librenms-error');
+        const errorMsgEl = document.getElementById('librenms-error-msg');
+        const wrapperEl = document.getElementById('librenms-graph-wrapper');
+        const rangeButtons = document.querySelectorAll('.graph-btn');
+
+        const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
+        let currentRange = "24h";
+
+        function loadGraph(range) {
+            if (!imgEl) return;
+            loadingEl.classList.remove('d-none');
+            errorEl.classList.add('d-none');
+            wrapperEl.classList.add('d-none');
+
+            // Force a cache-busting timestamp
+            imgEl.src = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
+        }
+
+        if (imgEl) {
+            imgEl.onload = function() {
+                loadingEl.classList.add('d-none');
+                wrapperEl.classList.remove('d-none');
+                errorEl.classList.add('d-none');
+            };
+
+            imgEl.onerror = async function() {
+                loadingEl.classList.add('d-none');
+                wrapperEl.classList.add('d-none');
+                errorEl.classList.remove('d-none');
+
+                try {
+                    const res = await fetch(imgEl.src);
+                    if (!res.ok) {
+                        const text = await res.text();
+                        errorMsgEl.textContent = text || "Failed to load LibreNMS graph image.";
+                    } else {
+                        errorMsgEl.textContent = "Failed to load LibreNMS graph image.";
+                    }
+                } catch (e) {
+                    errorMsgEl.textContent = "Failed to connect to LibreNMS or retrieve graph details.";
+                }
+            };
+        }
+
+        rangeButtons.forEach(btn => {
+            btn.addEventListener('click', function() {
+                rangeButtons.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                const range = this.getAttribute('data-range');
+                loadGraph(range);
+            });
+        });
+
+        // Initial load
+        loadGraph(currentRange);
+    })();
 </script>
