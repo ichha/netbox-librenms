@@ -862,8 +862,8 @@ class InterfaceLibreNMSGraphView(View):
         from_val = range_map.get(time_range, '-1d')
         
         # Prepare query parameters (dimensions, legend, inverse, and range)
-        width = request.GET.get('width') or '1350'
-        height = request.GET.get('height') or '350'
+        width = request.GET.get('width') or '550'
+        height = request.GET.get('height') or '200'
         legend = request.GET.get('legend', 'yes')
         inverse = request.GET.get('inverse', '0')
         

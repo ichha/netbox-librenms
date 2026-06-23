@@ -32,7 +32,4 @@ class InterfaceTrafficGraphExtension(PluginTemplateExtension):
     def right_page(self):
         return self.render_graph()
 
-    def full_width_page(self):
-        return self.render_graph()
-
 template_extensions = [InterfaceTrafficGraphExtension]
