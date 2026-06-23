@@ -861,14 +861,17 @@ class InterfaceLibreNMSGraphView(View):
         }
         from_val = range_map.get(time_range, '-1d')
         
-        # Prepare query parameters (dimensions and range)
-        width = request.GET.get('width')
-        height = request.GET.get('height')
-        api_params = {'from': from_val}
-        if width:
-            api_params['width'] = width
-        if height:
-            api_params['height'] = height
+        # Prepare query parameters (dimensions, legend, and range)
+        width = request.GET.get('width') or '1350'
+        height = request.GET.get('height') or '350'
+        legend = request.GET.get('legend', 'yes')
+        
+        api_params = {
+            'from': from_val,
+            'legend': legend,
+            'width': width,
+            'height': height,
+        }
 
         def validate_and_get_image(endpoint, params):
             """
