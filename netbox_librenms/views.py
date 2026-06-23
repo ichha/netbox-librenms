@@ -873,6 +873,8 @@ class InterfaceLibreNMSGraphView(View):
             'width': width,
             'height': height,
             'inverse': inverse,
+            'stacked': '1',
+            'graph_stacked': '1',
         }
 
         def validate_and_get_image(endpoint, params):
