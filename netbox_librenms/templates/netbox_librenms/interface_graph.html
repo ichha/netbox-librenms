@@ -125,8 +125,14 @@
                 cards[i].remove();
             }
         }
-
-
+        const cardEl = document.getElementById("librenms-traffic-card");
+        if (cardEl) {
+            // Find the Bootstrap column container (the right column) and move the card to the top
+            const column = cardEl.closest('.col') || cardEl.closest('[class*="col-"]') || cardEl.parentElement;
+            if (column) {
+                column.insertBefore(cardEl, column.firstChild);
+            }
+        }
 
         const imgEl = document.getElementById('librenms-interface-graph-img');
         const loadingEl = document.getElementById('librenms-loading');
