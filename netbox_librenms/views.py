@@ -208,28 +208,49 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
         # Get existing interfaces registered in NetBox
         existing_interfaces = set(instance.interfaces.values_list('name', flat=True))
 
-        # Map IP addresses to interface names or interface indices
-        ip_map = {}
+        # Build a port_id -> port mapping for IP lookup
+        port_id_to_ifname = {}
+        port_id_to_ifindex = {}
+        for port in ports:
+            pid = port.get('port_id') or port.get('id')
+            pname = port.get('ifName') or port.get('ifname') or port.get('port_name_raw') or port.get('port_name') or ''
+            pidx = port.get('ifIndex') or port.get('ifindex')
+            if pid:
+                if pname:
+                    port_id_to_ifname[str(pid)] = pname
+                if pidx:
+                    port_id_to_ifindex[str(pid)] = str(pidx)
+
+        # Map IP addresses to interface names
+        # LibreNMS /devices/{id}/ip API returns: port_id, ipv4_address, ipv4_prefixlen, ipv6_address, ipv6_prefixlen, ifName, ifIndex
+        ip_map = {}  # key: ifname (str) or ifindex (str) -> list of IP strings
         for ip_info in ips:
-            ifname = ip_info.get('ifName')
-            ifindex = ip_info.get('ifIndex')
-            
+            # Resolve ifname: try direct field first, then via port_id lookup
+            ifname = ip_info.get('ifName') or ip_info.get('ifname')
+            ifindex = ip_info.get('ifIndex') or ip_info.get('ifindex')
+            port_id = str(ip_info.get('port_id') or '')
+
+            if not ifname and port_id in port_id_to_ifname:
+                ifname = port_id_to_ifname[port_id]
+            if not ifindex and port_id in port_id_to_ifindex:
+                ifindex = port_id_to_ifindex[port_id]
+
             # Form IP string
             v4 = ip_info.get('ipv4_address')
             v4_len = ip_info.get('ipv4_prefixlen')
             v6 = ip_info.get('ipv6_address')
             v6_len = ip_info.get('ipv6_prefixlen')
-            
+
             ip_str_list = []
             if v4:
                 ip_str_list.append(f"{v4}/{v4_len}" if v4_len else v4)
             if v6:
                 ip_str_list.append(f"{v6}/{v6_len}" if v6_len else v6)
 
-            for key in [ifname, ifindex]:
+            # Store under ifname (str), ifindex (str), and port_id as fallback keys
+            for key in [ifname, str(ifindex) if ifindex else None, port_id if port_id else None]:
                 if key:
-                    if key not in ip_map:
-                        ip_map[key] = []
+                    ip_map.setdefault(key, [])
                     ip_map[key].extend(ip_str_list)
 
         # Build list of ports with integrated IP info
@@ -237,15 +258,21 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
         for port in ports:
             ifname = port.get('ifName') or port.get('ifname') or port.get('port_name_raw') or port.get('port_name') or port.get('ifDescr') or port.get('ifdescr') or ''
             ifindex = port.get('ifIndex') or port.get('ifindex')
-            
-            # Find IPs for this port
+            port_id = str(port.get('port_id') or port.get('id') or '')
+
+            # Find IPs for this port — try ifname, ifindex (as str), and port_id
             port_ips = []
-            if ifname in ip_map:
-                port_ips.extend(ip_map[ifname])
-            if ifindex in ip_map:
-                port_ips.extend(ip_map[ifindex])
-            # De-duplicate
-            port_ips = list(set(port_ips))
+            for lookup_key in [ifname, str(ifindex) if ifindex else None, port_id if port_id else None]:
+                if lookup_key and lookup_key in ip_map:
+                    port_ips.extend(ip_map[lookup_key])
+            # De-duplicate while preserving order
+            seen = set()
+            unique_ips = []
+            for ip in port_ips:
+                if ip not in seen:
+                    seen.add(ip)
+                    unique_ips.append(ip)
+            port_ips = unique_ips
 
             # Grab VLAN info from LibreNMS port object
             vlan = None
@@ -258,10 +285,19 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                         vlans_extracted.append(str(vid))
                 if vlans_extracted:
                     vlan = ", ".join(vlans_extracted)
-            
+
             if not vlan:
-                vlan = port.get('port_vlan') or port.get('port_vlan_id') or port.get('vlan') or port.get('vlan_id') or "N/A"
-                
+                # Try all known VLAN field names; cast to str to handle integer 0 correctly
+                for vlan_field in ['port_vlan', 'port_vlan_id', 'untagged_vlan', 'vlan', 'vlan_id']:
+                    raw_vlan = port.get(vlan_field)
+                    # Skip null / 0 / empty string — those mean "no VLAN"
+                    if raw_vlan is not None and str(raw_vlan) not in ('', '0', 'null', 'None'):
+                        vlan = str(raw_vlan)
+                        break
+
+            if not vlan:
+                vlan = "N/A"
+
             if vlan == "1":
                 vlan = "1 (Default)"
 
