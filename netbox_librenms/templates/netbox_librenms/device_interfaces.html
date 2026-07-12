@@ -71,6 +71,16 @@
         font-size: 0.8rem;
         font-weight: 600;
     }
+    .vrf-badge {
+        display: inline-block;
+        background-color: #f3f4f6;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
     .device-not-found {
         padding: 50px 20px;
         text-align: center;
@@ -133,6 +143,7 @@
                                         <th>MAC Address</th>
                                         <th>IP Addresses</th>
                                         <th>VLAN</th>
+                                        <th>VRF</th>
                                         <th style="width: 100px; text-align: center;">Select</th>
                                     </tr>
                                 </thead>
@@ -162,6 +173,13 @@
                                             <td class="port-vlan">
                                                 {% if port.vlan != 'N/A' %}
                                                     <span class="vlan-badge">{{ port.vlan }}</span>
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td class="port-vrf">
+                                                {% if port.vrf %}
+                                                    <span class="vrf-badge">{{ port.vrf }}</span>
                                                 {% else %}
                                                     -
                                                 {% endif %}
@@ -225,8 +243,9 @@
             var descr = row.querySelector('.port-descr').textContent.toLowerCase();
             var ips = row.querySelector('.port-ips').textContent.toLowerCase();
             var vlan = row.querySelector('.port-vlan').textContent.toLowerCase();
+            var vrf = row.querySelector('.port-vrf').textContent.toLowerCase();
             
-            if (name.includes(query) || descr.includes(query) || ips.includes(query) || vlan.includes(query)) {
+            if (name.includes(query) || descr.includes(query) || ips.includes(query) || vlan.includes(query) || vrf.includes(query)) {
                 row.style.display = '';
             } else {
                 row.style.display = 'none';

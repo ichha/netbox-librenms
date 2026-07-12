@@ -221,9 +221,16 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                 if pidx:
                     port_id_to_ifindex[str(pid)] = str(pidx)
 
-        # Map IP addresses to interface names
-        # LibreNMS /devices/{id}/ip API returns: port_id, ipv4_address, ipv4_prefixlen, ipv6_address, ipv6_prefixlen, ifName, ifIndex
-        ip_map = {}  # key: ifname (str) or ifindex (str) -> list of IP strings
+        # Map IP addresses to interface names to avoid collisions between namespaces
+        # (e.g. ifIndex and port_id namespaces overlap as they are both small numeric strings)
+        ip_by_port_id = {}
+        ip_by_ifname = {}
+        ip_by_ifindex = {}
+        
+        vrf_by_port_id = {}
+        vrf_by_ifname = {}
+        vrf_by_ifindex = {}
+
         for ip_info in ips:
             # Resolve ifname: try direct field first, then via port_id lookup
             ifname = ip_info.get('ifName') or ip_info.get('ifname')
@@ -247,24 +254,43 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             if v6:
                 ip_str_list.append(f"{v6}/{v6_len}" if v6_len else v6)
 
-            # Store under ifname (str), ifindex (str), and port_id as fallback keys
-            for key in [ifname, str(ifindex) if ifindex else None, port_id if port_id else None]:
-                if key:
-                    ip_map.setdefault(key, [])
-                    ip_map[key].extend(ip_str_list)
+            # Grab VRF name (stored as context_name in LibreNMS IP tables)
+            vrf = ip_info.get('context_name') or ip_info.get('vrf_name') or ip_info.get('vrf') or ''
 
-        # Build list of ports with integrated IP info
+            # Populate IP and VRF mappings separately by namespace
+            if port_id:
+                ip_by_port_id.setdefault(port_id, []).extend(ip_str_list)
+                if vrf:
+                    vrf_by_port_id[port_id] = vrf
+            if ifname:
+                ip_by_ifname.setdefault(ifname, []).extend(ip_str_list)
+                if vrf:
+                    vrf_by_ifname[ifname] = vrf
+            if ifindex:
+                ip_by_ifindex.setdefault(str(ifindex), []).extend(ip_str_list)
+                if vrf:
+                    vrf_by_ifindex[str(ifindex)] = vrf
+
+        # Build list of ports with integrated IP and VRF info
         interfaces_data = []
         for port in ports:
             ifname = port.get('ifName') or port.get('ifname') or port.get('port_name_raw') or port.get('port_name') or port.get('ifDescr') or port.get('ifdescr') or ''
             ifindex = port.get('ifIndex') or port.get('ifindex')
             port_id = str(port.get('port_id') or port.get('id') or '')
 
-            # Find IPs for this port — try ifname, ifindex (as str), and port_id
+            # Find IPs and VRF for this port — prioritize port_id, then ifname, then ifindex
             port_ips = []
-            for lookup_key in [ifname, str(ifindex) if ifindex else None, port_id if port_id else None]:
-                if lookup_key and lookup_key in ip_map:
-                    port_ips.extend(ip_map[lookup_key])
+            port_vrf = ''
+            if port_id and port_id in ip_by_port_id:
+                port_ips = ip_by_port_id[port_id]
+                port_vrf = vrf_by_port_id.get(port_id, '')
+            elif ifname and ifname in ip_by_ifname:
+                port_ips = ip_by_ifname[ifname]
+                port_vrf = vrf_by_ifname.get(ifname, '')
+            elif ifindex and str(ifindex) in ip_by_ifindex:
+                port_ips = ip_by_ifindex[str(ifindex)]
+                port_vrf = vrf_by_ifindex.get(str(ifindex), '')
+
             # De-duplicate while preserving order
             seen = set()
             unique_ips = []
@@ -294,6 +320,13 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                     if raw_vlan is not None and str(raw_vlan) not in ('', '0', 'null', 'None'):
                         vlan = str(raw_vlan)
                         break
+
+            # Fallback: try parsing VLAN ID from subinterface name (e.g. "Bundle-Ether2.1136" -> "1136")
+            if (not vlan or vlan == "N/A") and ifname:
+                if '.' in ifname:
+                    parts = ifname.split('.')
+                    if len(parts) > 1 and parts[-1].isdigit():
+                        vlan = parts[-1]
 
             if not vlan:
                 vlan = "N/A"
@@ -325,6 +358,7 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                 'oper_status': oper_status,
                 'ips': port_ips,
                 'vlan': vlan,
+                'vrf': port_vrf,
                 'exists_in_netbox': exists_in_netbox,
             })
 
