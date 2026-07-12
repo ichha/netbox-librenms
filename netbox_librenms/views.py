@@ -288,7 +288,7 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
 
             if not vlan:
                 # Try all known VLAN field names; cast to str to handle integer 0 correctly
-                for vlan_field in ['port_vlan', 'port_vlan_id', 'untagged_vlan', 'vlan', 'vlan_id']:
+                for vlan_field in ['ifVlan', 'ifvlan', 'port_vlan', 'port_vlan_id', 'untagged_vlan', 'vlan', 'vlan_id']:
                     raw_vlan = port.get(vlan_field)
                     # Skip null / 0 / empty string — those mean "no VLAN"
                     if raw_vlan is not None and str(raw_vlan) not in ('', '0', 'null', 'None'):
