@@ -205,6 +205,22 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
         ports = client.get_device_ports(device_id)
         ips = client.get_device_ips(device_id)
 
+        # Retrieve VRFs configured on the device
+        vrf_list = []
+        try:
+            vrf_res = client._request('GET', 'routing/vrf', params={'hostname': device_id})
+            if vrf_res.get('status') == 'ok':
+                vrf_list = vrf_res.get('vrfs', [])
+        except Exception:
+            pass
+
+        vrf_id_to_name = {}
+        for vrf_info in vrf_list:
+            vid = vrf_info.get('vrf_id')
+            vname = vrf_info.get('vrf_name')
+            if vid and vname:
+                vrf_id_to_name[str(vid)] = vname
+
         # Get existing interfaces registered in NetBox
         existing_interfaces = set(instance.interfaces.values_list('name', flat=True))
 
@@ -278,18 +294,27 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             ifindex = port.get('ifIndex') or port.get('ifindex')
             port_id = str(port.get('port_id') or port.get('id') or '')
 
-            # Find IPs and VRF for this port — prioritize port_id, then ifname, then ifindex
-            port_ips = []
+            # Find IPs and VRF for this port
+            # First try direct mapping from routing tables (using ifVrf mapped through vrf_id_to_name)
+            ifVrf = port.get('ifVrf')
             port_vrf = ''
+            if ifVrf and str(ifVrf) in vrf_id_to_name:
+                port_vrf = vrf_id_to_name[str(ifVrf)]
+
+            # Find IPs and fallback VRF — prioritize port_id, then ifname, then ifindex
+            port_ips = []
             if port_id and port_id in ip_by_port_id:
                 port_ips = ip_by_port_id[port_id]
-                port_vrf = vrf_by_port_id.get(port_id, '')
+                if not port_vrf:
+                    port_vrf = vrf_by_port_id.get(port_id, '')
             elif ifname and ifname in ip_by_ifname:
                 port_ips = ip_by_ifname[ifname]
-                port_vrf = vrf_by_ifname.get(ifname, '')
+                if not port_vrf:
+                    port_vrf = vrf_by_ifname.get(ifname, '')
             elif ifindex and str(ifindex) in ip_by_ifindex:
                 port_ips = ip_by_ifindex[str(ifindex)]
-                port_vrf = vrf_by_ifindex.get(str(ifindex), '')
+                if not port_vrf:
+                    port_vrf = vrf_by_ifindex.get(str(ifindex), '')
 
             # De-duplicate while preserving order
             seen = set()
