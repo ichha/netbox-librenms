@@ -415,7 +415,95 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             
         device_id = librenms_device.get('device_id')
         ports = client.get_device_ports(device_id)
+        ips = client.get_device_ips(device_id)
+
+        # Retrieve VRFs configured on the device
+        vrf_list = []
+        try:
+            vrf_res = client._request('GET', 'routing/vrf', params={'hostname': device_id})
+            if vrf_res.get('status') == 'ok':
+                vrf_list = vrf_res.get('vrfs', [])
+        except Exception:
+            pass
+
+        vrf_id_to_name = {}
+        for vrf_info in vrf_list:
+            vid = vrf_info.get('vrf_id')
+            vname = vrf_info.get('vrf_name')
+            if vid and vname:
+                vrf_id_to_name[str(vid)] = vname
+
+        # Retrieve VLANs configured on the device to get their names
+        vlan_id_to_name = {}
+        try:
+            device_vlans = client.get_device_vlans(device_id)
+            for vl in device_vlans:
+                vid = vl.get('vlan_id') or vl.get('vlan')
+                vname = vl.get('vlan_name') or vl.get('vlan_descr') or vl.get('vlan_desc')
+                if vid and vname:
+                    vlan_id_to_name[str(vid)] = vname
+        except Exception:
+            pass
+
+        # Build a port_id -> port mapping for IP lookup
+        port_id_to_ifname = {}
+        port_id_to_ifindex = {}
+        for port in ports:
+            pid = port.get('port_id') or port.get('id')
+            pname = port.get('ifName') or port.get('ifname') or port.get('port_name_raw') or port.get('port_name') or ''
+            pidx = port.get('ifIndex') or port.get('ifindex')
+            if pid:
+                if pname:
+                    port_id_to_ifname[str(pid)] = pname
+                if pidx:
+                    port_id_to_ifindex[str(pid)] = str(pidx)
+
+        # Map IP addresses to interface names to avoid collisions between namespaces
+        ip_by_port_id = {}
+        ip_by_ifname = {}
+        ip_by_ifindex = {}
         
+        vrf_by_port_id = {}
+        vrf_by_ifname = {}
+        vrf_by_ifindex = {}
+
+        for ip_info in ips:
+            ifname = ip_info.get('ifName') or ip_info.get('ifname')
+            ifindex = ip_info.get('ifIndex') or ip_info.get('ifindex')
+            port_id = str(ip_info.get('port_id') or '')
+
+            if not ifname and port_id in port_id_to_ifname:
+                ifname = port_id_to_ifname[port_id]
+            if not ifindex and port_id in port_id_to_ifindex:
+                ifindex = port_id_to_ifindex[port_id]
+
+            # Form IP string
+            v4 = ip_info.get('ipv4_address')
+            v4_len = ip_info.get('ipv4_prefixlen')
+            v6 = ip_info.get('ipv6_address')
+            v6_len = ip_info.get('ipv6_prefixlen')
+
+            ip_str_list = []
+            if v4:
+                ip_str_list.append(f"{v4}/{v4_len}" if v4_len else v4)
+            if v6:
+                ip_str_list.append(f"{v6}/{v6_len}" if v6_len else v6)
+
+            vrf = ip_info.get('context_name') or ip_info.get('vrf_name') or ip_info.get('vrf') or ''
+
+            if port_id:
+                ip_by_port_id.setdefault(port_id, []).extend(ip_str_list)
+                if vrf:
+                    vrf_by_port_id[port_id] = vrf
+            if ifname:
+                ip_by_ifname.setdefault(ifname, []).extend(ip_str_list)
+                if vrf:
+                    vrf_by_ifname[ifname] = vrf
+            if ifindex:
+                ip_by_ifindex.setdefault(str(ifindex), []).extend(ip_str_list)
+                if vrf:
+                    vrf_by_ifindex[str(ifindex)] = vrf
+
         # Build a map of port name -> port details
         ports_map = {}
         for p in ports:
@@ -432,6 +520,8 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                 continue
                 
             port_info = ports_map.get(name, {})
+            port_id = str(port_info.get('port_id') or port_info.get('id') or '')
+            ifindex = port_info.get('ifIndex') or port_info.get('ifindex')
             
             # Determine speed
             speed = 0
@@ -470,6 +560,125 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
             # Prioritize alias (user description) over name
             descr = port_info.get('ifAlias') or port_info.get('ifalias') or port_info.get('ifDescr') or port_info.get('ifdescr') or ''
             
+            # Determine VRF Name
+            ifVrf = port_info.get('ifVrf')
+            port_vrf_name = ''
+            if ifVrf and str(ifVrf) in vrf_id_to_name:
+                port_vrf_name = vrf_id_to_name[str(ifVrf)]
+            if not port_vrf_name:
+                if port_id and port_id in vrf_by_port_id:
+                    port_vrf_name = vrf_by_port_id[port_id]
+                elif name and name in vrf_by_ifname:
+                    port_vrf_name = vrf_by_ifname[name]
+                elif ifindex and str(ifindex) in vrf_by_ifindex:
+                    port_vrf_name = vrf_by_ifindex[str(ifindex)]
+
+            # Determine IPs
+            port_ips = []
+            if port_id and port_id in ip_by_port_id:
+                port_ips = ip_by_port_id[port_id]
+            elif name and name in ip_by_ifname:
+                port_ips = ip_by_ifname[name]
+            elif ifindex and str(ifindex) in ip_by_ifindex:
+                port_ips = ip_by_ifindex[str(ifindex)]
+
+            seen = set()
+            unique_ips = []
+            for ip in port_ips:
+                if ip not in seen:
+                    seen.add(ip)
+                    unique_ips.append(ip)
+            port_ips = unique_ips
+
+            # Determine VLAN
+            vlan = None
+            vlan_list = port_info.get('vlans')
+            if isinstance(vlan_list, list) and vlan_list:
+                vlans_extracted = []
+                for v in vlan_list:
+                    vid = v.get('vlan_id') or v.get('vlan')
+                    if vid:
+                        vlans_extracted.append(str(vid))
+                if vlans_extracted:
+                    vlan = vlans_extracted[0]
+
+            if not vlan:
+                for vlan_field in ['ifVlan', 'ifvlan', 'port_vlan', 'port_vlan_id', 'untagged_vlan', 'vlan', 'vlan_id']:
+                    raw_vlan = port_info.get(vlan_field)
+                    if raw_vlan is not None and str(raw_vlan) not in ('', '0', 'null', 'None'):
+                        vlan = str(raw_vlan)
+                        break
+
+            if (not vlan or vlan == "N/A") and name:
+                if '.' in name:
+                    parts = name.split('.')
+                    if len(parts) > 1 and parts[-1].isdigit():
+                        vlan = parts[-1]
+
+            # Get or create VRF object in NetBox
+            vrf_obj = None
+            if port_vrf_name:
+                from ipam.models import VRF
+                try:
+                    vrf_obj = VRF.objects.filter(name__iexact=port_vrf_name).first()
+                    if not vrf_obj:
+                        vrf_obj = VRF.objects.create(name=port_vrf_name)
+                except Exception:
+                    pass
+
+            # Get or create VLAN object in NetBox
+            vlan_obj = None
+            if vlan and vlan != "N/A" and vlan != "1 (Default)":
+                try:
+                    vlan_vid = int(vlan)
+                    from ipam.models import VLAN, VLANGroup
+                    from django.db.models import Q
+                    
+                    # Resolve VLAN Group based on Device's Site's Region
+                    vlan_group_obj = None
+                    if device.site and hasattr(device.site, 'region') and device.site.region:
+                        region = device.site.region
+                        from django.utils.text import slugify
+                        vlan_group_obj = VLANGroup.objects.filter(
+                            Q(name__iexact=region.name) | Q(slug__iexact=region.slug)
+                        ).first()
+                        if not vlan_group_obj:
+                            try:
+                                vlan_group_obj = VLANGroup.objects.create(
+                                    name=region.name,
+                                    slug=slugify(region.name)
+                                )
+                            except Exception:
+                                pass
+                                    
+                    # Try to find existing VLAN in the same group
+                    vlan_obj = VLAN.objects.filter(vid=vlan_vid, group=vlan_group_obj).first()
+                    if not vlan_obj:
+                        # Fallback to any VLAN with the same VID
+                        vlan_obj = VLAN.objects.filter(vid=vlan_vid).first()
+                        if vlan_obj:
+                            # Update group and site if they are empty
+                            needs_save = False
+                            if not vlan_obj.group and vlan_group_obj:
+                                vlan_obj.group = vlan_group_obj
+                                needs_save = True
+                            if not vlan_obj.site and device.site:
+                                vlan_obj.site = device.site
+                                needs_save = True
+                            if needs_save:
+                                vlan_obj.save()
+                        else:
+                            # Create new VLAN
+                            vname = vlan_id_to_name.get(str(vlan_vid)) or f"VLAN {vlan_vid}"
+                            vlan_obj = VLAN.objects.create(
+                                vid=vlan_vid,
+                                name=vname,
+                                group=vlan_group_obj,
+                                site=device.site
+                            )
+                except Exception:
+                    pass
+
             try:
                 # Create the interface in NetBox
                 interface = Interface.objects.create(
@@ -477,7 +686,8 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                     name=name,
                     type=iftype,
                     description=descr[:200] if descr else '',
-                    enabled=True
+                    enabled=True,
+                    untagged_vlan=vlan_obj
                 )
                 added_count += 1
                 
@@ -494,8 +704,67 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                             assigned_object_id=interface.id
                         )
                     except Exception:
-                        # Don't fail the interface import if MAC assignment fails
                         pass
+
+                # Create/link IP addresses and Prefix in NetBox
+                if port_ips:
+                    from ipam.models import IPAddress, Prefix
+                    from django.contrib.contenttypes.models import ContentType
+                    import ipaddress
+                    interface_ct = ContentType.objects.get_for_model(Interface)
+
+                    for ip_str in port_ips:
+                        try:
+                            # Ensure CIDR notation
+                            if '/' not in ip_str:
+                                if ':' in ip_str:
+                                    ip_str_cidr = ip_str + '/128'
+                                else:
+                                    ip_str_cidr = ip_str + '/32'
+                            else:
+                                ip_str_cidr = ip_str
+
+                            # Resolve network prefix from interface IP
+                            prefix_str = None
+                            try:
+                                net = ipaddress.ip_network(ip_str_cidr, strict=False)
+                                prefix_str = str(net)
+                            except ValueError:
+                                pass
+
+                            # Create or update Prefix in NetBox
+                            if prefix_str:
+                                try:
+                                    prefix_obj = Prefix.objects.filter(prefix=prefix_str, vrf=vrf_obj).first()
+                                    if prefix_obj:
+                                        prefix_obj.description = descr[:200] if descr else ''
+                                        prefix_obj.save()
+                                    else:
+                                        Prefix.objects.create(
+                                            prefix=prefix_str,
+                                            vrf=vrf_obj,
+                                            description=descr[:200] if descr else '',
+                                            status='active'
+                                        )
+                                except Exception:
+                                    pass
+
+                            # Create or update IPAddress
+                            ip_obj = IPAddress.objects.filter(address=ip_str_cidr, vrf=vrf_obj).first()
+                            if ip_obj:
+                                ip_obj.assigned_object_type = interface_ct
+                                ip_obj.assigned_object_id = interface.id
+                                ip_obj.save()
+                            else:
+                                IPAddress.objects.create(
+                                    address=ip_str_cidr,
+                                    assigned_object_type=interface_ct,
+                                    assigned_object_id=interface.id,
+                                    vrf=vrf_obj
+                                )
+                        except Exception:
+                            pass
+
             except Exception as e:
                 messages.error(request, f"Failed to add interface {name}: {str(e)}")
                 
