@@ -669,13 +669,29 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                                 vlan_obj.save()
                         else:
                             # Create new VLAN
-                            vname = vlan_id_to_name.get(str(vlan_vid)) or f"VLAN {vlan_vid}"
+                            vname_raw = vlan_id_to_name.get(str(vlan_vid)) or f"VLAN {vlan_vid}"
+                            if vlan_group_obj:
+                                group_prefix = f"{vlan_group_obj.name} "
+                                if not vname_raw.startswith(group_prefix):
+                                    vname = f"{vlan_group_obj.name} {vname_raw}"
+                                else:
+                                    vname = vname_raw
+                            else:
+                                vname = vname_raw
+                                
                             vlan_obj = VLAN.objects.create(
                                 vid=vlan_vid,
                                 name=vname,
                                 group=vlan_group_obj,
                                 site=device.site
                             )
+                            
+                    # Always ensure existing VLAN has group name prefix if assigned to a group
+                    if vlan_obj and vlan_group_obj:
+                        group_prefix = f"{vlan_group_obj.name} "
+                        if not vlan_obj.name.startswith(group_prefix):
+                            vlan_obj.name = f"{vlan_group_obj.name} {vlan_obj.name}"
+                            vlan_obj.save()
                 except Exception:
                     pass
 
