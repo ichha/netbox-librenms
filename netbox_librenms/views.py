@@ -738,13 +738,16 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                                     prefix_obj = Prefix.objects.filter(prefix=prefix_str, vrf=vrf_obj).first()
                                     if prefix_obj:
                                         prefix_obj.description = descr[:200] if descr else ''
+                                        if vlan_obj:
+                                            prefix_obj.vlan = vlan_obj
                                         prefix_obj.save()
                                     else:
                                         Prefix.objects.create(
                                             prefix=prefix_str,
                                             vrf=vrf_obj,
                                             description=descr[:200] if descr else '',
-                                            status='active'
+                                            status='active',
+                                            vlan=vlan_obj
                                         )
                                 except Exception:
                                     pass
