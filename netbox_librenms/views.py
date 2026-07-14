@@ -654,12 +654,12 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                     # Try to find existing VLAN in the same group
                     vlan_obj = VLAN.objects.filter(vid=vlan_vid, group=vlan_group_obj).first()
                     if not vlan_obj:
-                        # Fallback to any VLAN with the same VID
-                        vlan_obj = VLAN.objects.filter(vid=vlan_vid).first()
+                        # Fallback to any VLAN with the same VID that has NO group assigned
+                        vlan_obj = VLAN.objects.filter(vid=vlan_vid, group=None).first()
                         if vlan_obj:
                             # Update group and site if they are empty
                             needs_save = False
-                            if not vlan_obj.group and vlan_group_obj:
+                            if vlan_group_obj:
                                 vlan_obj.group = vlan_group_obj
                                 needs_save = True
                             if not vlan_obj.site and device.site:
@@ -686,11 +686,11 @@ class DeviceLibreNMSInterfacesView(generic.ObjectView):
                                 site=device.site
                             )
                             
-                    # Always ensure existing VLAN has group name prefix if assigned to a group
+                    # Always ensure existing VLAN has correct group name prefix if assigned to a group
                     if vlan_obj and vlan_group_obj:
-                        group_prefix = f"{vlan_group_obj.name} "
-                        if not vlan_obj.name.startswith(group_prefix):
-                            vlan_obj.name = f"{vlan_group_obj.name} {vlan_obj.name}"
+                        expected_name = f"{vlan_group_obj.name} {vlan_id_to_name.get(str(vlan_vid)) or f'VLAN {vlan_vid}'}"
+                        if vlan_obj.name != expected_name:
+                            vlan_obj.name = expected_name
                             vlan_obj.save()
                 except Exception:
                     pass
