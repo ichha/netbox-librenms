@@ -1,6 +1,7 @@
 import logging
 import requests
 from django.conf import settings
+from django.core.cache import cache
 
 logger = logging.getLogger('netbox.plugins.netbox_librenms')
 
@@ -23,6 +24,10 @@ class LibreNMSClient:
         if not self.is_configured():
             raise ValueError("LibreNMS plugin is not configured in PLUGINS_CONFIG.")
         
+        # Simple circuit breaker check
+        if cache.get("librenms_circuit_broken"):
+            raise requests.exceptions.ConnectionError("LibreNMS connection is temporarily suspended (circuit breaker active).")
+
         url = f"{self.base_url}/api/v0/{endpoint.lstrip('/')}"
         try:
             response = requests.request(
@@ -39,7 +44,19 @@ class LibreNMSClient:
                 return response
             return response.json()
         except requests.exceptions.RequestException as e:
-            logger.error(f"LibreNMS API Error for {url}: {str(e)}")
+            status_code = getattr(e.response, 'status_code', None) if e.response is not None else None
+            
+            # If it's a 404, log at warning/info level and raise
+            if status_code == 404:
+                logger.info(f"LibreNMS API 404 (Not Found) for {url}")
+            else:
+                logger.error(f"LibreNMS API Error for {url}: {str(e)}")
+                
+                # If it's a connection error or timeout, trigger circuit breaker
+                if status_code is None or status_code >= 500:
+                    logger.warning("LibreNMS connection error/timeout. Activating circuit breaker for 30 seconds.")
+                    cache.set("librenms_circuit_broken", True, 30)
+            
             raise e
 
     def get_device(self, ip_or_name):
@@ -47,34 +64,63 @@ class LibreNMSClient:
         Retrieves a device from LibreNMS.
         Accepts IP address or hostname.
         """
+        if not ip_or_name:
+            return None
+
+        # Clean key for cache
+        cache_key = f"librenms_device_lookup_{ip_or_name}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            if cached_result == "NOT_FOUND":
+                return None
+            return cached_result
+
+        dev = None
         try:
             # First try direct retrieval
             res = self._request('GET', f"devices/{ip_or_name}")
             if res.get('status') == 'ok' and res.get('devices'):
-                return res['devices'][0]
+                dev = res['devices'][0]
         except Exception:
             pass
         
-        # If that fails, search the global devices list
-        try:
-            res = self._request('GET', 'devices')
-            if res.get('status') == 'ok' and res.get('devices'):
-                target_lower = str(ip_or_name).lower().strip()
-                for dev in res['devices']:
-                    hostname = str(dev.get('hostname') or '').lower().strip()
-                    sysname = str(dev.get('sysName') or '').lower().strip()
-                    display = str(dev.get('display') or '').lower().strip()
-                    ip = str(dev.get('ip') or '').lower().strip()
-                    
-                    if (target_lower == hostname or 
-                        target_lower == sysname or 
-                        target_lower == display or 
-                        target_lower == ip):
-                        return dev
-        except Exception:
-            pass
+        if not dev:
+            # If that fails, search the global devices list
+            try:
+                # Cache the list of all devices for 60 seconds to avoid repeating heavy load
+                devices_list_key = "librenms_all_devices_list"
+                all_devices = cache.get(devices_list_key)
+                if all_devices is None:
+                    res = self._request('GET', 'devices')
+                    if res.get('status') == 'ok' and res.get('devices'):
+                        all_devices = res['devices']
+                        cache.set(devices_list_key, all_devices, 60)
+                    else:
+                        all_devices = []
+
+                if all_devices:
+                    target_lower = str(ip_or_name).lower().strip()
+                    for d in all_devices:
+                        hostname = str(d.get('hostname') or '').lower().strip()
+                        sysname = str(d.get('sysName') or '').lower().strip()
+                        display = str(d.get('display') or '').lower().strip()
+                        ip = str(d.get('ip') or '').lower().strip()
+                        
+                        if (target_lower == hostname or 
+                            target_lower == sysname or 
+                            target_lower == display or 
+                            target_lower == ip):
+                            dev = d
+                            break
+            except Exception:
+                pass
             
-        return None
+        if dev:
+            cache.set(cache_key, dev, 300) # Cache hit for 5 minutes
+            return dev
+        else:
+            cache.set(cache_key, "NOT_FOUND", 60) # Cache miss for 1 minute
+            return None
 
     def get_device_ports(self, hostname_or_id):
         """
