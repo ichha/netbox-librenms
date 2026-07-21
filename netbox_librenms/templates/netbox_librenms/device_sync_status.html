@@ -84,7 +84,7 @@
         </div>
         <div class="col-auto flex-grow-1" style="max-width: 400px;">
           <select name="role_id" id="role-select" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="">All Configured Roles ({% if configured_roles %}{{ configured_roles|length }}{% else %}All Roles{% endif %})</option>
+            <option value="" {% if not selected_role_id %}selected{% endif %}>All Devices</option>
             {% for r in all_roles %}
               <option value="{{ r.id }}" {% if selected_role_id == r.id %}selected{% endif %}>
                 {{ r.name }}
@@ -94,15 +94,17 @@
         </div>
         <div class="col-auto">
           {% if selected_role_id %}
-            <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}" class="btn btn-sm btn-outline-secondary">Clear Filter</a>
+            <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}" class="btn btn-sm btn-outline-secondary">Show All Devices</a>
           {% endif %}
         </div>
         <div class="col-auto ms-auto">
           <span class="badge bg-light text-dark border">
-            {% if configured_roles %}
-              <i class="mdi mdi-filter-check"></i> {{ configured_roles|length }} Synced Roles Enabled
+            {% if selected_role %}
+              <i class="mdi mdi-filter"></i> Role: {{ selected_role.name }}
+            {% elif configured_roles %}
+              <i class="mdi mdi-filter-check"></i> {{ configured_roles|length }} Configured Roles Active
             {% else %}
-              <i class="mdi mdi-earth"></i> Showing All Device Roles
+              <i class="mdi mdi-earth"></i> Showing All NetBox Devices
             {% endif %}
           </span>
         </div>

@@ -1359,7 +1359,7 @@ class RoleSettingsView(View):
                 'id': r.id,
                 'name': r.name,
                 'slug': r.slug,
-                'device_count': r.devices.filter(status='active').count(),
+                'device_count': r.devices.count(),
                 'is_selected': r.id in selected_ids
             })
 
@@ -1397,11 +1397,12 @@ class DeviceSyncStatusView(View):
         if selected_role_id and selected_role_id.isdigit():
             filter_role = all_roles.filter(id=int(selected_role_id)).first()
 
-        netbox_devices = Device.objects.filter(status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+        netbox_devices = Device.objects.all().select_related('role', 'primary_ip4', 'primary_ip6')
 
         if filter_role:
             netbox_devices = netbox_devices.filter(role=filter_role)
-        elif configured_role_ids:
+        elif configured_role_ids and request.GET.get('show_all') != 'true':
+            # Default to configured roles if configured, unless user selected all or specific role
             netbox_devices = netbox_devices.filter(role_id__in=configured_role_ids)
 
         per_page_str = request.GET.get('per_page', '50')
@@ -1525,12 +1526,12 @@ class SyncDevicesActionView(View):
         role_id = request.POST.get('role_id')
 
         if target_device_id and target_device_id.isdigit():
-            devices_to_process = Device.objects.filter(id=int(target_device_id), status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+            devices_to_process = Device.objects.filter(id=int(target_device_id)).select_related('role', 'primary_ip4', 'primary_ip6')
         elif role_id and role_id.isdigit():
-            devices_to_process = Device.objects.filter(role_id=int(role_id), status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+            devices_to_process = Device.objects.filter(role_id=int(role_id)).select_related('role', 'primary_ip4', 'primary_ip6')
         else:
             configured_role_ids = get_user_configured_role_ids(request)
-            devices_to_process = Device.objects.filter(status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+            devices_to_process = Device.objects.all().select_related('role', 'primary_ip4', 'primary_ip6')
             if configured_role_ids:
                 devices_to_process = devices_to_process.filter(role_id__in=configured_role_ids)
 
