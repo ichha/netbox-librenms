@@ -1497,10 +1497,12 @@ class DeviceSyncStatusView(View):
         pending_count = total_devices - synced_count
 
         configured_roles_objs = all_roles.filter(id__in=configured_role_ids) if configured_role_ids else None
+        filter_roles = configured_roles_objs if configured_roles_objs else all_roles
 
         context = {
             'all_roles': all_roles,
             'configured_roles': configured_roles_objs,
+            'filter_roles': filter_roles,
             'configured_role_ids': configured_role_ids,
             'selected_role': filter_role,
             'selected_role_id': filter_role.id if filter_role else None,

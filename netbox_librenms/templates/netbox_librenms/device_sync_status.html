@@ -84,8 +84,10 @@
         </div>
         <div class="col-auto flex-grow-1" style="max-width: 400px;">
           <select name="role_id" id="role-select" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="" {% if not selected_role_id %}selected{% endif %}>All Devices</option>
-            {% for r in all_roles %}
+            <option value="" {% if not selected_role_id %}selected{% endif %}>
+              {% if configured_roles %}All Configured Roles ({{ configured_roles|length }}){% else %}All Devices{% endif %}
+            </option>
+            {% for r in filter_roles %}
               <option value="{{ r.id }}" {% if selected_role_id == r.id %}selected{% endif %}>
                 {{ r.name }}
               </option>
@@ -132,14 +134,14 @@
           {% for row in device_rows %}
             <tr>
               <td>
-                <a href="{{ row.device.get_absolute_url }}" class="fw-bold">{{ row.name }}</a>
+                <a href="{{ row.device.get_absolute_url }}" class="fw-bold text-primary">{{ row.name }}</a>
               </td>
               <td>
-                <code>{{ row.ip|default:"—" }}</code>
+                <code class="fw-bold fs-7">{{ row.ip|default:"—" }}</code>
               </td>
               <td>
                 {% if row.device.role %}
-                  <span class="badge text-white" style="background-color: #{{ row.device.role.color|default:'6c757d' }};">
+                  <span class="badge text-white" style="background-color: #{{ row.device.role.color|default:'4b5563' }}; font-weight: 600; font-size: 0.85rem; border: 1px solid rgba(0,0,0,0.15); text-shadow: 0 1px 2px rgba(0,0,0,0.6);">
                     {{ row.device.role.name }}
                   </span>
                 {% else %}
@@ -148,47 +150,49 @@
               </td>
               <td>
                 {% if row.snmp_type == 'SNMPv2c' %}
-                  <span class="badge bg-info text-dark">SNMPv2c</span>
+                  <span class="badge bg-info text-dark fw-bold" style="font-size: 0.82rem;">SNMPv2c</span>
                 {% elif row.snmp_type == 'SNMPv3' %}
-                  <span class="badge bg-primary">SNMPv3</span>
+                  <span class="badge bg-primary text-white fw-bold" style="font-size: 0.82rem;">SNMPv3</span>
                 {% else %}
-                  <span class="badge bg-light text-muted">None</span>
+                  <span class="badge bg-secondary text-white" style="font-size: 0.82rem;">None</span>
                 {% endif %}
               </td>
               <td>
                 {% if row.snmp_params_list %}
                   {% for param in row.snmp_params_list %}
-                    <small class="d-block text-monospace text-muted">{{ param }}</small>
+                    <small class="d-block font-monospace fw-bold text-body" style="font-size: 0.8rem;">{{ param }}</small>
                   {% endfor %}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
               <td>
-                <span class="badge bg-{{ row.status_class }}">
-                  {% if row.is_synced %}
-                    <i class="mdi mdi-check"></i> Synced
-                  {% else %}
-                    <i class="mdi mdi-clock-outline"></i> Pending Sync
-                  {% endif %}
-                </span>
+                {% if row.is_synced %}
+                  <span class="badge bg-success text-white fw-bold" style="font-size: 0.82rem; padding: 6px 10px;">
+                    <i class="mdi mdi-check-circle me-1"></i> Synced
+                  </span>
+                {% else %}
+                  <span class="badge bg-danger text-white fw-bold" style="font-size: 0.82rem; padding: 6px 10px;">
+                    <i class="mdi mdi-alert-circle me-1"></i> Pending Sync
+                  </span>
+                {% endif %}
               </td>
               <td>
                 {% if row.lnms_device %}
-                  <span class="text-success"><i class="mdi mdi-server-network"></i> {{ row.lnms_device.hostname }}</span>
+                  <span class="text-success fw-bold"><i class="mdi mdi-server-network me-1"></i> {{ row.lnms_device.hostname }}</span>
                 {% else %}
                   <span class="text-muted">Not in LibreNMS</span>
                 {% endif %}
               </td>
               <td class="text-end">
                 {% if row.is_synced %}
-                  <span class="btn btn-sm btn-outline-success disabled"><i class="mdi mdi-check"></i> Synced</span>
+                  <span class="btn btn-sm btn-outline-success disabled fw-bold" style="font-size: 0.82rem;"><i class="mdi mdi-check"></i> Synced</span>
                 {% else %}
                   <form action="{% url 'plugins:netbox_librenms:sync_devices' %}" method="post" class="d-inline">
                     {% csrf_token %}
                     <input type="hidden" name="device_id" value="{{ row.id }}" />
-                    <button type="submit" class="btn btn-sm btn-outline-primary" title="Push this device to LibreNMS">
-                      <i class="mdi mdi-cloud-upload"></i> Sync Device
+                    <button type="submit" class="btn btn-sm btn-primary text-white fw-bold px-3" style="font-size: 0.82rem;" title="Push this device to LibreNMS">
+                      <i class="mdi mdi-cloud-upload me-1"></i> Sync Device
                     </button>
                   </form>
                 {% endif %}
