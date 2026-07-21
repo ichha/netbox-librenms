@@ -9,9 +9,6 @@ from ipam.models import IPAddress
 from netbox.views import generic
 from utilities.views import ViewTab, register_model_view
 from .utils import LibreNMSClient
-from .models import SyncedDeviceRole
-from .forms import SyncedDeviceRoleForm
-from .tables import SyncedDeviceRoleTable
 
 def get_librenms_device(client, netbox_device):
     """
@@ -1330,63 +1327,38 @@ class InterfaceLibreNMSGraphView(View):
                 return HttpResponse(err_msg, status=500, content_type="text/plain")
 
 
-class RoleSettingsListView(generic.ObjectListView):
-    queryset = SyncedDeviceRole.objects.all()
-    table = SyncedDeviceRoleTable
-    template_name = 'netbox_librenms/role_settings.html'
-
-
-class RoleSettingsEditView(generic.ObjectEditView):
-    queryset = SyncedDeviceRole.objects.all()
-    form = SyncedDeviceRoleForm
-    template_name = 'generic/object_edit.html'
-
-
-class RoleSettingsDeleteView(generic.ObjectDeleteView):
-    queryset = SyncedDeviceRole.objects.all()
-
-
 class DeviceSyncStatusView(View):
     def get(self, request):
         client = LibreNMSClient()
         librenms_configured = client.is_configured()
 
-        table_missing = False
-        try:
-            synced_roles = list(SyncedDeviceRole.objects.filter(enabled=True).select_related('role'))
-            role_ids = [sr.role_id for sr in synced_roles]
-        except Exception as db_err:
-            synced_roles = []
-            role_ids = []
-            table_missing = True
-            messages.error(
-                request,
-                "Database table 'netbox_librenms_synceddevicerole' was not found. Please run 'python manage.py migrate' (or 'python3 manage.py migrate' in Docker) on your NetBox server to apply plugin migrations."
-            )
+        config = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
+        configured_role_slugs = config.get('device_roles', []) or config.get('device_role_slugs', [])
+
+        all_roles = DeviceRole.objects.all().order_by('name')
 
         selected_role_id = request.GET.get('role_id')
-        filter_role_id = None
+        filter_role = None
         if selected_role_id and selected_role_id.isdigit():
-            filter_role_id = int(selected_role_id)
+            filter_role = all_roles.filter(id=int(selected_role_id)).first()
 
-        all_netbox_devices = Device.objects.filter(
-            status='active',
-            role_id__in=role_ids
-        ).select_related('role', 'primary_ip4', 'primary_ip6')
+        netbox_devices = Device.objects.filter(status='active').select_related('role', 'primary_ip4', 'primary_ip6')
 
-        if filter_role_id:
-            netbox_devices = all_netbox_devices.filter(role_id=filter_role_id)
-        else:
-            netbox_devices = all_netbox_devices
+        if filter_role:
+            netbox_devices = netbox_devices.filter(role=filter_role)
+        elif configured_role_slugs:
+            netbox_devices = netbox_devices.filter(role__slug__in=configured_role_slugs)
 
         lnms_map = {}
         if librenms_configured:
             try:
                 lnms_map = client.get_all_librenms_devices_map()
             except Exception as e:
-                messages.error(request, f"LibreNMS API connection error: {str(e)}")
+                messages.error(request, f"LibreNMS API Connection Error: {str(e)}")
 
         device_rows = []
+        synced_count = 0
+
         for dev in netbox_devices:
             ip = ""
             if dev.primary_ip4 and dev.primary_ip4.address:
@@ -1407,10 +1379,11 @@ class DeviceSyncStatusView(View):
 
             ip_clean = ip.strip().lower()
             name_clean = str(dev.name or "").strip().lower()
-            matched_lnms_dev = lnms_map.get(ip_clean) or lnms_map.get(name_clean)
+            matched_lnms_dev = (lnms_map.get(ip_clean) if ip_clean else None) or (lnms_map.get(name_clean) if name_clean else None)
 
             is_synced = bool(matched_lnms_dev)
             if is_synced:
+                synced_count += 1
                 status_label = "Synced"
                 status_class = "success"
             else:
@@ -1419,6 +1392,7 @@ class DeviceSyncStatusView(View):
 
             device_rows.append({
                 'device': dev,
+                'id': dev.id,
                 'name': dev.name,
                 'ip': ip,
                 'role_name': dev.role.name if dev.role else "",
@@ -1431,27 +1405,18 @@ class DeviceSyncStatusView(View):
                 'lnms_device': matched_lnms_dev
             })
 
-        # Calculate card totals
-        total_devices = all_netbox_devices.count()
-        synced_count = 0
-        for dev in all_netbox_devices:
-            dev_ip = str(dev.primary_ip4.address.ip) if dev.primary_ip4 else (str(dev.primary_ip6.address.ip) if dev.primary_ip6 else "")
-            ip_clean = dev_ip.strip().lower()
-            name_clean = str(dev.name or "").strip().lower()
-            if lnms_map.get(ip_clean) or lnms_map.get(name_clean):
-                synced_count += 1
-
+        total_devices = len(device_rows)
         pending_count = total_devices - synced_count
 
         context = {
-            'synced_roles': synced_roles,
-            'selected_role_id': filter_role_id,
+            'all_roles': all_roles,
+            'selected_role': filter_role,
+            'selected_role_id': filter_role.id if filter_role else None,
             'device_rows': device_rows,
             'total_devices': total_devices,
             'synced_devices': synced_count,
             'devices_to_sync': pending_count,
             'librenms_configured': librenms_configured,
-            'table_missing': table_missing,
         }
         return render(request, 'netbox_librenms/device_sync_status.html', context)
 
@@ -1463,20 +1428,19 @@ class SyncDevicesActionView(View):
             messages.error(request, "LibreNMS integration settings are missing.")
             return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
+        target_device_id = request.POST.get('device_id')
         role_id = request.POST.get('role_id')
-        try:
-            synced_roles = SyncedDeviceRole.objects.filter(enabled=True)
-            if role_id and role_id.isdigit():
-                synced_roles = synced_roles.filter(role_id=int(role_id))
-            role_ids = [sr.role_id for sr in synced_roles]
-        except Exception as db_err:
-            messages.error(request, "Database table 'netbox_librenms_synceddevicerole' not found. Please run 'python manage.py migrate'.")
-            return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
-        devices_to_process = Device.objects.filter(
-            status='active',
-            role_id__in=role_ids
-        ).select_related('role', 'primary_ip4', 'primary_ip6')
+        if target_device_id and target_device_id.isdigit():
+            devices_to_process = Device.objects.filter(id=int(target_device_id), status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+        elif role_id and role_id.isdigit():
+            devices_to_process = Device.objects.filter(role_id=int(role_id), status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+        else:
+            config = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
+            configured_role_slugs = config.get('device_roles', []) or config.get('device_role_slugs', [])
+            devices_to_process = Device.objects.filter(status='active').select_related('role', 'primary_ip4', 'primary_ip6')
+            if configured_role_slugs:
+                devices_to_process = devices_to_process.filter(role__slug__in=configured_role_slugs)
 
         try:
             lnms_map = client.get_all_librenms_devices_map()
@@ -1489,6 +1453,7 @@ class SyncDevicesActionView(View):
         created = 0
         skipped = 0
         failed = 0
+        failed_reasons = []
 
         for dev in devices_to_process:
             name = dev.name
@@ -1502,7 +1467,7 @@ class SyncDevicesActionView(View):
                 skipped += 1
                 continue
 
-            # Check if already in LibreNMS
+            # Check if already present in LibreNMS
             if lnms_map.get(ip.lower()) or lnms_map.get(str(name).lower()):
                 role_name = dev.role.name if dev.role else ""
                 if role_name:
@@ -1520,7 +1485,7 @@ class SyncDevicesActionView(View):
                 try:
                     client.create_device_group(role_name)
                     group_names.add(role_name)
-                except Exception as g_err:
+                except Exception:
                     pass
 
             cf = dev.custom_field_data or {}
@@ -1531,12 +1496,14 @@ class SyncDevicesActionView(View):
                 try:
                     res = client.add_device_v2(ip, community)
                 except Exception as e:
-                    pass
+                    failed_reasons.append(f"{name} ({ip}): {str(e)}")
             elif cf.get("security_name"):
                 try:
                     res = client.add_device_v3(ip, cf)
                 except Exception as e:
-                    pass
+                    failed_reasons.append(f"{name} ({ip}): {str(e)}")
+            else:
+                failed_reasons.append(f"{name} ({ip}): No SNMP community or security_name found in custom fields")
 
             if res is not None:
                 if role_name:
@@ -1552,10 +1519,15 @@ class SyncDevicesActionView(View):
             else:
                 failed += 1
 
-        messages.success(
-            request,
-            f"Device sync complete: {created} added, {skipped} skipped/already present, {failed} failed."
-        )
+        msg = f"Device sync finished: {created} added to LibreNMS, {skipped} skipped (already present/no IP), {failed} failed."
+        if failed_reasons:
+            msg += f" Details: {'; '.join(failed_reasons[:3])}"
+        
+        if created > 0 or skipped > 0:
+            messages.success(request, msg)
+        else:
+            messages.warning(request, msg)
+
         return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
 

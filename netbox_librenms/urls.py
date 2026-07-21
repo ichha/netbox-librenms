@@ -4,10 +4,6 @@ from . import views
 urlpatterns = [
     # Navigation views
     path('device-sync-status/', views.DeviceSyncStatusView.as_view(), name='device_sync_status'),
-    path('role-settings/', views.RoleSettingsListView.as_view(), name='role_settings'),
-    path('role-settings/add/', views.RoleSettingsEditView.as_view(), name='role_settings_add'),
-    path('role-settings/<int:pk>/edit/', views.RoleSettingsEditView.as_view(), name='role_settings_edit'),
-    path('role-settings/<int:pk>/delete/', views.RoleSettingsDeleteView.as_view(), name='role_settings_delete'),
     path('sync-devices/', views.SyncDevicesActionView.as_view(), name='sync_devices'),
 
     # Device & Interface Tab Views
