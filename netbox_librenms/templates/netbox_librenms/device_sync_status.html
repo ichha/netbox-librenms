@@ -29,6 +29,12 @@
     </div>
   {% endif %}
 
+  {% if table_missing %}
+    <div class="alert alert-danger" role="alert">
+      <i class="mdi mdi-database-alert"></i> <strong>Database Migrations Pending:</strong> The database table <code>netbox_librenms_synceddevicerole</code> does not exist yet. Please run <code>python manage.py migrate</code> (or <code>python3 manage.py migrate</code> inside your Docker container) to create the required database tables.
+    </div>
+  {% endif %}
+
   <!-- Summary Cards -->
   <div class="row mb-4">
     <div class="col-md-4">

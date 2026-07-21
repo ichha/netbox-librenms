@@ -1351,8 +1351,18 @@ class DeviceSyncStatusView(View):
         client = LibreNMSClient()
         librenms_configured = client.is_configured()
 
-        synced_roles = SyncedDeviceRole.objects.filter(enabled=True).select_related('role')
-        role_ids = [sr.role_id for sr in synced_roles]
+        table_missing = False
+        try:
+            synced_roles = list(SyncedDeviceRole.objects.filter(enabled=True).select_related('role'))
+            role_ids = [sr.role_id for sr in synced_roles]
+        except Exception as db_err:
+            synced_roles = []
+            role_ids = []
+            table_missing = True
+            messages.error(
+                request,
+                "Database table 'netbox_librenms_synceddevicerole' was not found. Please run 'python manage.py migrate' (or 'python3 manage.py migrate' in Docker) on your NetBox server to apply plugin migrations."
+            )
 
         selected_role_id = request.GET.get('role_id')
         filter_role_id = None
@@ -1441,6 +1451,7 @@ class DeviceSyncStatusView(View):
             'synced_devices': synced_count,
             'devices_to_sync': pending_count,
             'librenms_configured': librenms_configured,
+            'table_missing': table_missing,
         }
         return render(request, 'netbox_librenms/device_sync_status.html', context)
 
@@ -1453,11 +1464,15 @@ class SyncDevicesActionView(View):
             return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
         role_id = request.POST.get('role_id')
-        synced_roles = SyncedDeviceRole.objects.filter(enabled=True)
-        if role_id and role_id.isdigit():
-            synced_roles = synced_roles.filter(role_id=int(role_id))
+        try:
+            synced_roles = SyncedDeviceRole.objects.filter(enabled=True)
+            if role_id and role_id.isdigit():
+                synced_roles = synced_roles.filter(role_id=int(role_id))
+            role_ids = [sr.role_id for sr in synced_roles]
+        except Exception as db_err:
+            messages.error(request, "Database table 'netbox_librenms_synceddevicerole' not found. Please run 'python manage.py migrate'.")
+            return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
-        role_ids = [sr.role_id for sr in synced_roles]
         devices_to_process = Device.objects.filter(
             status='active',
             role_id__in=role_ids
