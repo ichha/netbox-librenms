@@ -4,6 +4,7 @@ from django.urls import reverse
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.views.generic import View
+from django.core.paginator import Paginator
 from dcim.models import Device, Interface, DeviceRole
 from ipam.models import IPAddress
 from netbox.views import generic
@@ -1327,15 +1328,69 @@ class InterfaceLibreNMSGraphView(View):
                 return HttpResponse(err_msg, status=500, content_type="text/plain")
 
 
+def get_user_configured_role_ids(request):
+    if hasattr(request, 'user') and hasattr(request.user, 'config'):
+        val = request.user.config.get('plugins.netbox_librenms.device_roles')
+        if val is not None and isinstance(val, list):
+            return [int(x) for x in val if str(x).isdigit()]
+    
+    if 'netbox_librenms_device_roles' in request.session:
+        val = request.session.get('netbox_librenms_device_roles', [])
+        if isinstance(val, list):
+            return [int(x) for x in val if str(x).isdigit()]
+
+    config = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
+    configured_roles = config.get('device_roles', []) or config.get('device_role_slugs', [])
+    if configured_roles:
+        return list(DeviceRole.objects.filter(slug__in=configured_roles).values_list('id', flat=True))
+
+    return []
+
+
+class RoleSettingsView(View):
+    def get(self, request):
+        all_roles = DeviceRole.objects.all().order_by('name')
+        selected_ids = get_user_configured_role_ids(request)
+
+        role_list = []
+        for r in all_roles:
+            role_list.append({
+                'role': r,
+                'id': r.id,
+                'name': r.name,
+                'slug': r.slug,
+                'device_count': r.devices.filter(status='active').count(),
+                'is_selected': r.id in selected_ids
+            })
+
+        context = {
+            'role_list': role_list,
+            'selected_count': len(selected_ids),
+        }
+        return render(request, 'netbox_librenms/role_settings.html', context)
+
+    def post(self, request):
+        raw_ids = request.POST.getlist('device_roles')
+        selected_ids = [int(x) for x in raw_ids if str(x).isdigit()]
+
+        if hasattr(request, 'user') and hasattr(request.user, 'config'):
+            try:
+                request.user.config.set('plugins.netbox_librenms.device_roles', selected_ids, commit=True)
+            except Exception:
+                pass
+        request.session['netbox_librenms_device_roles'] = selected_ids
+
+        messages.success(request, f"Synced Device Roles updated ({len(selected_ids)} roles selected).")
+        return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
+
+
 class DeviceSyncStatusView(View):
     def get(self, request):
         client = LibreNMSClient()
         librenms_configured = client.is_configured()
 
-        config = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
-        configured_role_slugs = config.get('device_roles', []) or config.get('device_role_slugs', [])
-
         all_roles = DeviceRole.objects.all().order_by('name')
+        configured_role_ids = get_user_configured_role_ids(request)
 
         selected_role_id = request.GET.get('role_id')
         filter_role = None
@@ -1346,8 +1401,20 @@ class DeviceSyncStatusView(View):
 
         if filter_role:
             netbox_devices = netbox_devices.filter(role=filter_role)
-        elif configured_role_slugs:
-            netbox_devices = netbox_devices.filter(role__slug__in=configured_role_slugs)
+        elif configured_role_ids:
+            netbox_devices = netbox_devices.filter(role_id__in=configured_role_ids)
+
+        per_page_str = request.GET.get('per_page', '50')
+        try:
+            per_page = int(per_page_str)
+            if per_page not in [25, 50, 100, 250, 500]:
+                per_page = 50
+        except ValueError:
+            per_page = 50
+
+        page_num = request.GET.get('page', 1)
+        paginator = Paginator(netbox_devices, per_page)
+        page_obj = paginator.get_page(page_num)
 
         lnms_map = {}
         if librenms_configured:
@@ -1357,9 +1424,7 @@ class DeviceSyncStatusView(View):
                 messages.error(request, f"LibreNMS API Connection Error: {str(e)}")
 
         device_rows = []
-        synced_count = 0
-
-        for dev in netbox_devices:
+        for dev in page_obj.object_list:
             ip = ""
             if dev.primary_ip4 and dev.primary_ip4.address:
                 ip = str(dev.primary_ip4.address.ip)
@@ -1369,11 +1434,26 @@ class DeviceSyncStatusView(View):
             cf = dev.custom_field_data or {}
             snmp_v2_community = cf.get("snmp_community")
             snmp_v3_secname = cf.get("security_name")
+            snmp_v3_seclevel = cf.get("security_level")
+            snmp_v3_auth_proto = cf.get("authentication_protocol")
+            snmp_v3_priv_proto = cf.get("privacy_protocol")
+            snmp_v3_context = cf.get("context_name")
 
+            snmp_params_list = []
             if snmp_v2_community:
                 snmp_type = "SNMPv2c"
+                snmp_params_list.append(f"Community: {snmp_v2_community}")
             elif snmp_v3_secname:
                 snmp_type = "SNMPv3"
+                snmp_params_list.append(f"SecName: {snmp_v3_secname}")
+                if snmp_v3_seclevel:
+                    snmp_params_list.append(f"Level: {snmp_v3_seclevel}")
+                if snmp_v3_auth_proto:
+                    snmp_params_list.append(f"Auth: {snmp_v3_auth_proto}")
+                if snmp_v3_priv_proto:
+                    snmp_params_list.append(f"Priv: {snmp_v3_priv_proto}")
+                if snmp_v3_context:
+                    snmp_params_list.append(f"Context: {snmp_v3_context}")
             else:
                 snmp_type = "None"
 
@@ -1383,7 +1463,6 @@ class DeviceSyncStatusView(View):
 
             is_synced = bool(matched_lnms_dev)
             if is_synced:
-                synced_count += 1
                 status_label = "Synced"
                 status_class = "success"
             else:
@@ -1397,22 +1476,36 @@ class DeviceSyncStatusView(View):
                 'ip': ip,
                 'role_name': dev.role.name if dev.role else "",
                 'snmp_type': snmp_type,
-                'snmp_v2': snmp_v2_community or "",
-                'snmp_v3_secname': snmp_v3_secname or "",
+                'snmp_params_list': snmp_params_list,
                 'is_synced': is_synced,
                 'status_label': status_label,
                 'status_class': status_class,
                 'lnms_device': matched_lnms_dev
             })
 
-        total_devices = len(device_rows)
+        total_devices = netbox_devices.count()
+        synced_count = 0
+        if lnms_map:
+            for dev in netbox_devices:
+                dev_ip = str(dev.primary_ip4.address.ip) if dev.primary_ip4 else (str(dev.primary_ip6.address.ip) if dev.primary_ip6 else "")
+                ip_clean = dev_ip.strip().lower()
+                name_clean = str(dev.name or "").strip().lower()
+                if lnms_map.get(ip_clean) or lnms_map.get(name_clean):
+                    synced_count += 1
+
         pending_count = total_devices - synced_count
+
+        configured_roles_objs = all_roles.filter(id__in=configured_role_ids) if configured_role_ids else None
 
         context = {
             'all_roles': all_roles,
+            'configured_roles': configured_roles_objs,
+            'configured_role_ids': configured_role_ids,
             'selected_role': filter_role,
             'selected_role_id': filter_role.id if filter_role else None,
             'device_rows': device_rows,
+            'page_obj': page_obj,
+            'per_page': per_page,
             'total_devices': total_devices,
             'synced_devices': synced_count,
             'devices_to_sync': pending_count,
@@ -1436,11 +1529,10 @@ class SyncDevicesActionView(View):
         elif role_id and role_id.isdigit():
             devices_to_process = Device.objects.filter(role_id=int(role_id), status='active').select_related('role', 'primary_ip4', 'primary_ip6')
         else:
-            config = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
-            configured_role_slugs = config.get('device_roles', []) or config.get('device_role_slugs', [])
+            configured_role_ids = get_user_configured_role_ids(request)
             devices_to_process = Device.objects.filter(status='active').select_related('role', 'primary_ip4', 'primary_ip6')
-            if configured_role_slugs:
-                devices_to_process = devices_to_process.filter(role__slug__in=configured_role_slugs)
+            if configured_role_ids:
+                devices_to_process = devices_to_process.filter(role_id__in=configured_role_ids)
 
         try:
             lnms_map = client.get_all_librenms_devices_map()
@@ -1467,7 +1559,6 @@ class SyncDevicesActionView(View):
                 skipped += 1
                 continue
 
-            # Check if already present in LibreNMS
             if lnms_map.get(ip.lower()) or lnms_map.get(str(name).lower()):
                 role_name = dev.role.name if dev.role else ""
                 if role_name:
@@ -1480,7 +1571,6 @@ class SyncDevicesActionView(View):
 
             role_name = dev.role.name if dev.role else ""
 
-            # Ensure dynamic group exists in LibreNMS
             if role_name and role_name not in group_names:
                 try:
                     client.create_device_group(role_name)
@@ -1529,6 +1619,7 @@ class SyncDevicesActionView(View):
             messages.warning(request, msg)
 
         return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
+
 
 
 

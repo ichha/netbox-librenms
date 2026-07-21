@@ -1,1 +1,92 @@
-{# Not used #}
+{% extends 'base/layout.html' %}
+{% load helpers %}
+
+{% block title %}LibreNMS Device Role Settings{% endblock %}
+
+{% block controls %}
+  <div class="controls">
+    <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}" class="btn btn-secondary">
+      <i class="mdi mdi-arrow-left"></i> Device Sync Status
+    </a>
+  </div>
+{% endblock controls %}
+
+{% block content %}
+  <form action="{% url 'plugins:netbox_librenms:role_settings' %}" method="post">
+    {% csrf_token %}
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+          <h5 class="card-title mb-0">Select Device Roles for LibreNMS Sync</h5>
+          <small class="text-muted">Only active devices under selected roles will be listed and pushed to LibreNMS.</small>
+        </div>
+        <button type="submit" class="btn btn-primary">
+          <i class="mdi mdi-check"></i> Save Role Selection
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="width: 40px;">
+                <input type="checkbox" class="form-check-input" id="select-all-roles" />
+              </th>
+              <th>Device Role Name</th>
+              <th>Slug</th>
+              <th class="text-center">Active NetBox Devices</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in role_list %}
+              <tr>
+                <td>
+                  <input type="checkbox" name="device_roles" value="{{ item.id }}" class="form-check-input role-checkbox" {% if item.is_selected %}checked{% endif %} />
+                </td>
+                <td>
+                  <a href="{{ item.role.get_absolute_url }}" class="fw-bold">{{ item.name }}</a>
+                </td>
+                <td><code>{{ item.slug }}</code></td>
+                <td class="text-center">
+                  <span class="badge bg-secondary">{{ item.device_count }}</span>
+                </td>
+                <td>
+                  {% if item.is_selected %}
+                    <span class="badge bg-success">Selected for Sync</span>
+                  {% else %}
+                    <span class="badge bg-light text-muted">Excluded</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                  No Device Roles configured in NetBox yet.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card-footer text-end">
+        <button type="submit" class="btn btn-primary">
+          <i class="mdi mdi-check"></i> Save Role Selection
+        </button>
+      </div>
+    </div>
+  </form>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const selectAll = document.getElementById('select-all-roles');
+      if (selectAll) {
+        selectAll.addEventListener('change', function() {
+          const checkboxes = document.querySelectorAll('.role-checkbox');
+          checkboxes.forEach(cb => cb.checked = selectAll.checked);
+        });
+      }
+    });
+  </script>
+{% endblock content %}
