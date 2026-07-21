@@ -16,6 +16,12 @@ class NetBoxLibreNMSConfig(PluginConfig):
     default_settings = {
         'verify_ssl': True,
         'allow_unauth_graphs': False,
+        'auto_sync_enabled': True,
     }
+
+    def ready(self):
+        super().ready()
+        from . import signals
+
 
 config = NetBoxLibreNMSConfig
