@@ -1,0 +1,14 @@
+{% extends 'generic/object_list.html' %}
+
+{% block title %}LibreNMS Synced Device Roles{% endblock %}
+
+{% block controls %}
+  <div class="controls">
+    <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}" class="btn btn-secondary me-2">
+      <i class="mdi mdi-arrow-left"></i> Device Sync Status
+    </a>
+    <a href="{% url 'plugins:netbox_librenms:role_settings_add' %}" class="btn btn-primary">
+      <i class="mdi mdi-plus-thick"></i> Add Synced Device Role
+    </a>
+  </div>
+{% endblock controls %}

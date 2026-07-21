@@ -2,11 +2,16 @@ from django.conf import settings
 from django.contrib import messages
 from django.urls import reverse
 from django.http import HttpResponseRedirect
-from dcim.models import Device, Interface
+from django.shortcuts import render
+from django.views.generic import View
+from dcim.models import Device, Interface, DeviceRole
 from ipam.models import IPAddress
 from netbox.views import generic
 from utilities.views import ViewTab, register_model_view
 from .utils import LibreNMSClient
+from .models import SyncedDeviceRole
+from .forms import SyncedDeviceRoleForm
+from .tables import SyncedDeviceRoleTable
 
 def get_librenms_device(client, netbox_device):
     """
@@ -1323,6 +1328,221 @@ class InterfaceLibreNMSGraphView(View):
                 err_msg = f"Failed to fetch graph via both single and double encoded routes. Single error: {str(single_err)}. Double error: {str(double_err)}"
                 logger.error(err_msg)
                 return HttpResponse(err_msg, status=500, content_type="text/plain")
+
+
+class RoleSettingsListView(generic.ObjectListView):
+    queryset = SyncedDeviceRole.objects.all()
+    table = SyncedDeviceRoleTable
+    template_name = 'netbox_librenms/role_settings.html'
+
+
+class RoleSettingsEditView(generic.ObjectEditView):
+    queryset = SyncedDeviceRole.objects.all()
+    form = SyncedDeviceRoleForm
+    template_name = 'generic/object_edit.html'
+
+
+class RoleSettingsDeleteView(generic.ObjectDeleteView):
+    queryset = SyncedDeviceRole.objects.all()
+
+
+class DeviceSyncStatusView(View):
+    def get(self, request):
+        client = LibreNMSClient()
+        librenms_configured = client.is_configured()
+
+        synced_roles = SyncedDeviceRole.objects.filter(enabled=True).select_related('role')
+        role_ids = [sr.role_id for sr in synced_roles]
+
+        selected_role_id = request.GET.get('role_id')
+        filter_role_id = None
+        if selected_role_id and selected_role_id.isdigit():
+            filter_role_id = int(selected_role_id)
+
+        all_netbox_devices = Device.objects.filter(
+            status='active',
+            role_id__in=role_ids
+        ).select_related('role', 'primary_ip4', 'primary_ip6')
+
+        if filter_role_id:
+            netbox_devices = all_netbox_devices.filter(role_id=filter_role_id)
+        else:
+            netbox_devices = all_netbox_devices
+
+        lnms_map = {}
+        if librenms_configured:
+            try:
+                lnms_map = client.get_all_librenms_devices_map()
+            except Exception as e:
+                messages.error(request, f"LibreNMS API connection error: {str(e)}")
+
+        device_rows = []
+        for dev in netbox_devices:
+            ip = ""
+            if dev.primary_ip4 and dev.primary_ip4.address:
+                ip = str(dev.primary_ip4.address.ip)
+            elif dev.primary_ip6 and dev.primary_ip6.address:
+                ip = str(dev.primary_ip6.address.ip)
+
+            cf = dev.custom_field_data or {}
+            snmp_v2_community = cf.get("snmp_community")
+            snmp_v3_secname = cf.get("security_name")
+
+            if snmp_v2_community:
+                snmp_type = "SNMPv2c"
+            elif snmp_v3_secname:
+                snmp_type = "SNMPv3"
+            else:
+                snmp_type = "None"
+
+            ip_clean = ip.strip().lower()
+            name_clean = str(dev.name or "").strip().lower()
+            matched_lnms_dev = lnms_map.get(ip_clean) or lnms_map.get(name_clean)
+
+            is_synced = bool(matched_lnms_dev)
+            if is_synced:
+                status_label = "Synced"
+                status_class = "success"
+            else:
+                status_label = "Pending Sync"
+                status_class = "warning" if snmp_type != "None" else "danger"
+
+            device_rows.append({
+                'device': dev,
+                'name': dev.name,
+                'ip': ip,
+                'role_name': dev.role.name if dev.role else "",
+                'snmp_type': snmp_type,
+                'snmp_v2': snmp_v2_community or "",
+                'snmp_v3_secname': snmp_v3_secname or "",
+                'is_synced': is_synced,
+                'status_label': status_label,
+                'status_class': status_class,
+                'lnms_device': matched_lnms_dev
+            })
+
+        # Calculate card totals
+        total_devices = all_netbox_devices.count()
+        synced_count = 0
+        for dev in all_netbox_devices:
+            dev_ip = str(dev.primary_ip4.address.ip) if dev.primary_ip4 else (str(dev.primary_ip6.address.ip) if dev.primary_ip6 else "")
+            ip_clean = dev_ip.strip().lower()
+            name_clean = str(dev.name or "").strip().lower()
+            if lnms_map.get(ip_clean) or lnms_map.get(name_clean):
+                synced_count += 1
+
+        pending_count = total_devices - synced_count
+
+        context = {
+            'synced_roles': synced_roles,
+            'selected_role_id': filter_role_id,
+            'device_rows': device_rows,
+            'total_devices': total_devices,
+            'synced_devices': synced_count,
+            'devices_to_sync': pending_count,
+            'librenms_configured': librenms_configured,
+        }
+        return render(request, 'netbox_librenms/device_sync_status.html', context)
+
+
+class SyncDevicesActionView(View):
+    def post(self, request):
+        client = LibreNMSClient()
+        if not client.is_configured():
+            messages.error(request, "LibreNMS integration settings are missing.")
+            return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
+
+        role_id = request.POST.get('role_id')
+        synced_roles = SyncedDeviceRole.objects.filter(enabled=True)
+        if role_id and role_id.isdigit():
+            synced_roles = synced_roles.filter(role_id=int(role_id))
+
+        role_ids = [sr.role_id for sr in synced_roles]
+        devices_to_process = Device.objects.filter(
+            status='active',
+            role_id__in=role_ids
+        ).select_related('role', 'primary_ip4', 'primary_ip6')
+
+        try:
+            lnms_map = client.get_all_librenms_devices_map()
+            lnms_groups = client.get_device_groups()
+            group_names = {g.get("name") for g in lnms_groups if isinstance(g, dict) and "name" in g}
+        except Exception as e:
+            messages.error(request, f"LibreNMS API Error: {str(e)}")
+            return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
+
+        created = 0
+        skipped = 0
+        failed = 0
+
+        for dev in devices_to_process:
+            name = dev.name
+            ip = ""
+            if dev.primary_ip4 and dev.primary_ip4.address:
+                ip = str(dev.primary_ip4.address.ip)
+            elif dev.primary_ip6 and dev.primary_ip6.address:
+                ip = str(dev.primary_ip6.address.ip)
+
+            if not ip:
+                skipped += 1
+                continue
+
+            # Check if already in LibreNMS
+            if lnms_map.get(ip.lower()) or lnms_map.get(str(name).lower()):
+                role_name = dev.role.name if dev.role else ""
+                if role_name:
+                    try:
+                        client.update_device_purpose(ip, role_name)
+                    except Exception:
+                        pass
+                skipped += 1
+                continue
+
+            role_name = dev.role.name if dev.role else ""
+
+            # Ensure dynamic group exists in LibreNMS
+            if role_name and role_name not in group_names:
+                try:
+                    client.create_device_group(role_name)
+                    group_names.add(role_name)
+                except Exception as g_err:
+                    pass
+
+            cf = dev.custom_field_data or {}
+            community = cf.get("snmp_community")
+
+            res = None
+            if community:
+                try:
+                    res = client.add_device_v2(ip, community)
+                except Exception as e:
+                    pass
+            elif cf.get("security_name"):
+                try:
+                    res = client.add_device_v3(ip, cf)
+                except Exception as e:
+                    pass
+
+            if res is not None:
+                if role_name:
+                    try:
+                        client.update_device_purpose(ip, role_name)
+                    except Exception:
+                        pass
+                try:
+                    client.discover_device(ip)
+                except Exception:
+                    pass
+                created += 1
+            else:
+                failed += 1
+
+        messages.success(
+            request,
+            f"Device sync complete: {created} added, {skipped} skipped/already present, {failed} failed."
+        )
+        return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
+
 
 
 

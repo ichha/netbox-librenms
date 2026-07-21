@@ -20,7 +20,7 @@ class LibreNMSClient:
     def is_configured(self):
         return bool(self.base_url and self.api_token)
 
-    def _request(self, method, endpoint, params=None, stream=False):
+    def _request(self, method, endpoint, params=None, stream=False, json_data=None):
         if not self.is_configured():
             raise ValueError("LibreNMS plugin is not configured in PLUGINS_CONFIG.")
         
@@ -35,8 +35,9 @@ class LibreNMSClient:
                 url=url,
                 headers=self.headers,
                 params=params,
+                json=json_data,
                 verify=self.verify_ssl,
-                timeout=5,
+                timeout=15 if method in ['POST', 'PATCH', 'PUT'] else 5,
                 stream=stream
             )
             response.raise_for_status()
@@ -364,3 +365,136 @@ class LibreNMSClient:
         }
         
         return self._request('GET', endpoint, params=params, stream=True)
+
+    def add_device_v2(self, ip, community):
+        """
+        Adds a device to LibreNMS using SNMPv2c.
+        """
+        payload = {
+            "hostname": ip,
+            "version": "v2c",
+            "community": community
+        }
+        return self._request('POST', 'devices', params=None, stream=False, json_data=payload)
+
+    def add_device_v3(self, ip, cf):
+        """
+        Adds a device to LibreNMS using SNMPv3.
+        """
+        payload = {
+            "hostname": ip,
+            "version": "v3",
+            "authlevel": cf.get("security_level", "authPriv"),
+            "authname": cf.get("security_name", ""),
+            "authpass": cf.get("authentication_passphrase", ""),
+            "authalgo": cf.get("authentication_protocol", "SHA"),
+            "cryptopass": cf.get("privacy_passphrase", ""),
+            "cryptoalgo": cf.get("privacy_protocol", "AES"),
+            "contextname": cf.get("context_name", "")
+        }
+        return self._request('POST', 'devices', params=None, stream=False, json_data=payload)
+
+    def update_device_purpose(self, ip_or_id, purpose_text):
+        """
+        Updates the purpose field of a device in LibreNMS.
+        """
+        import urllib.parse
+        encoded_id = urllib.parse.quote(str(ip_or_id), safe='')
+        payload = {
+            "field": "purpose",
+            "data": purpose_text
+        }
+        return self._request('PATCH', f"devices/{encoded_id}", params=None, stream=False, json_data=payload)
+
+    def create_device_group(self, group_name):
+        """
+        Creates a dynamic device group in LibreNMS matching purpose.
+        """
+        import json
+        rules_dict = {
+            "condition": "AND",
+            "rules": [
+                {
+                    "id": "devices.purpose",
+                    "field": "devices.purpose",
+                    "type": "string",
+                    "input": "text",
+                    "operator": "contains",
+                    "value": group_name
+                }
+            ],
+            "valid": True
+        }
+
+        payload = {
+            "name": group_name,
+            "desc": group_name,
+            "type": "dynamic",
+            "rules": json.dumps(rules_dict)
+        }
+        return self._request('POST', 'devicegroups', params=None, stream=False, json_data=payload)
+
+    def get_device_groups(self):
+        """
+        Retrieves all device groups from LibreNMS.
+        """
+        try:
+            res = self._request('GET', 'devicegroups')
+            if isinstance(res, dict):
+                return res.get("groups") or res.get("devicegroups") or []
+        except Exception as e:
+            logger.error(f"Failed to retrieve LibreNMS device groups: {str(e)}")
+        return []
+
+    def get_devices_in_group(self, group_name):
+        """
+        Retrieves devices belonging to a specific LibreNMS group.
+        """
+        import urllib.parse
+        try:
+            encoded_name = urllib.parse.quote(group_name, safe='')
+            res = self._request('GET', f"devicegroups/{encoded_name}")
+            if isinstance(res, dict):
+                return res.get("devices", [])
+        except Exception as e:
+            logger.error(f"Failed to retrieve devices in group '{group_name}': {str(e)}")
+        return []
+
+    def discover_device(self, ip_or_id):
+        """
+        Triggers discovery for a device in LibreNMS.
+        """
+        import urllib.parse
+        try:
+            encoded_id = urllib.parse.quote(str(ip_or_id), safe='')
+            return self._request('GET', f"devices/{encoded_id}/discover")
+        except Exception as e:
+            logger.error(f"Failed to discover device '{ip_or_id}': {str(e)}")
+            return None
+
+    def get_all_librenms_devices_map(self):
+        """
+        Returns a dictionary mapping hostname, sysName, display, and IP to device objects in LibreNMS.
+        """
+        devices_map = {}
+        try:
+            res = self._request('GET', 'devices')
+            if isinstance(res, dict) and res.get('status') == 'ok':
+                for dev in res.get('devices', []):
+                    hostname = str(dev.get('hostname') or '').lower().strip()
+                    sysname = str(dev.get('sysName') or '').lower().strip()
+                    display = str(dev.get('display') or '').lower().strip()
+                    ip = str(dev.get('ip') or '').lower().strip()
+
+                    if hostname:
+                        devices_map[hostname] = dev
+                    if sysname:
+                        devices_map[sysname] = dev
+                    if display:
+                        devices_map[display] = dev
+                    if ip:
+                        devices_map[ip] = dev
+        except Exception as e:
+            logger.error(f"Failed to fetch all LibreNMS devices map: {str(e)}")
+        return devices_map
+

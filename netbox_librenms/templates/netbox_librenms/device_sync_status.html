@@ -1,0 +1,172 @@
+{% extends 'base/layout.html' %}
+{% load helpers %}
+
+{% block title %}LibreNMS Device Sync Status{% endblock %}
+
+{% block controls %}
+  <div class="controls">
+    {% if librenms_configured %}
+      <form action="{% url 'plugins:netbox_librenms:sync_devices' %}" method="post" class="d_inline">
+        {% csrf_token %}
+        {% if selected_role_id %}
+          <input type="hidden" name="role_id" value="{{ selected_role_id }}" />
+        {% endif %}
+        <button type="submit" class="btn btn-primary" title="Push unsynced devices to LibreNMS">
+          <i class="mdi mdi-cloud-upload"></i> Sync Devices to LibreNMS
+        </button>
+      </form>
+    {% endif %}
+    <a href="{% url 'plugins:netbox_librenms:role_settings' %}" class="btn btn-secondary">
+      <i class="mdi mdi-cog"></i> Manage Synced Roles
+    </a>
+  </div>
+{% endblock controls %}
+
+{% block content %}
+  {% if not librenms_configured %}
+    <div class="alert alert-warning" role="alert">
+      <i class="mdi mdi-alert"></i> <strong>LibreNMS Plugin is not configured:</strong> Please configure <code>libre_nms_url</code> and <code>libre_nms_api_token</code> in your <code>PLUGINS_CONFIG</code> settings.
+    </div>
+  {% endif %}
+
+  <!-- Summary Cards -->
+  <div class="row mb-4">
+    <div class="col-md-4">
+      <div class="card card-sm bg-body-tertiary border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="avatar bg-primary text-white p-3 rounded-circle me-3">
+            <i class="mdi mdi-server fs-2"></i>
+          </div>
+          <div>
+            <div class="fs-6 text-muted text-uppercase fw-semibold">Total Devices</div>
+            <div class="fs-2 fw-bold text-primary">{{ total_devices }}</div>
+            <div class="fs-7 text-muted">Devices under enabled roles</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card card-sm bg-body-tertiary border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="avatar bg-success text-white p-3 rounded-circle me-3">
+            <i class="mdi mdi-check-circle fs-2"></i>
+          </div>
+          <div>
+            <div class="fs-6 text-muted text-uppercase fw-semibold">Synced Devices</div>
+            <div class="fs-2 fw-bold text-success">{{ synced_devices }}</div>
+            <div class="fs-7 text-muted">Found in LibreNMS</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card card-sm bg-body-tertiary border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="avatar bg-warning text-white p-3 rounded-circle me-3">
+            <i class="mdi mdi-sync-alert fs-2"></i>
+          </div>
+          <div>
+            <div class="fs-6 text-muted text-uppercase fw-semibold">Devices to be Synced</div>
+            <div class="fs-2 fw-bold text-warning">{{ devices_to_sync }}</div>
+            <div class="fs-7 text-muted">Pending push to LibreNMS</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Role Filter Bar -->
+  <div class="card mb-3">
+    <div class="card-body d-flex justify-content-between align-items-center py-2">
+      <div class="d-flex align-items-center gap-2">
+        <span class="fw-semibold text-muted">Filter by Role:</span>
+        <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}" class="btn btn-sm {% if not selected_role_id %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+          All Roles
+        </a>
+        {% for sr in synced_roles %}
+          <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?role_id={{ sr.role.id }}" class="btn btn-sm {% if selected_role_id == sr.role.id %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+            {{ sr.role.name }}
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Devices Table -->
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover table-headings align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Device Name</th>
+            <th>Primary IP</th>
+            <th>Device Role</th>
+            <th>SNMP Protocol</th>
+            <th>Community / SecName</th>
+            <th>Sync Status</th>
+            <th>LibreNMS Hostname</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in device_rows %}
+            <tr>
+              <td>
+                <a href="{{ row.device.get_absolute_url }}" class="fw-bold">{{ row.name }}</a>
+              </td>
+              <td>
+                <code>{{ row.ip|default:"—" }}</code>
+              </td>
+              <td>
+                <span class="badge bg-secondary">{{ row.role_name }}</span>
+              </td>
+              <td>
+                {% if row.snmp_type == 'SNMPv2c' %}
+                  <span class="badge bg-info text-dark">SNMPv2c</span>
+                {% elif row.snmp_type == 'SNMPv3' %}
+                  <span class="badge bg-primary">SNMPv3</span>
+                {% else %}
+                  <span class="badge bg-light text-muted">None</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.snmp_v2 %}
+                  <code>{{ row.snmp_v2 }}</code>
+                {% elif row.snmp_v3_secname %}
+                  <code>{{ row.snmp_v3_secname }}</code>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="badge bg-{{ row.status_class }}">
+                  {% if row.is_synced %}
+                    <i class="mdi mdi-check"></i> Synced
+                  {% else %}
+                    <i class="mdi mdi-clock-outline"></i> Pending Sync
+                  {% endif %}
+                </span>
+              </td>
+              <td>
+                {% if row.lnms_device %}
+                  <span class="text-success"><i class="mdi mdi-server-network"></i> {{ row.lnms_device.hostname }}</span>
+                {% else %}
+                  <span class="text-muted">Not in LibreNMS</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="7" class="text-center text-muted py-4">
+                <i class="mdi mdi-information-outline fs-3 d-block mb-1"></i>
+                No active devices found for the configured Device Roles.
+                {% if not synced_roles %}
+                  <br /><a href="{% url 'plugins:netbox_librenms:role_settings_add' %}" class="btn btn-sm btn-primary mt-2">Add Device Roles to Sync</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock content %}
