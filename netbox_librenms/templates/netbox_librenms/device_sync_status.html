@@ -32,7 +32,7 @@
   <!-- Summary Cards -->
   <div class="row mb-4">
     <div class="col-md-4">
-      <div class="card card-sm bg-body-tertiary border-0 shadow-sm">
+      <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}{% if selected_role_id %}?role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if not status_filter %}border border-primary border-2{% else %}border-0{% endif %}" title="Click to view all devices">
         <div class="card-body d-flex align-items-center">
           <div class="avatar bg-primary text-white p-3 rounded-circle me-3">
             <i class="mdi mdi-server fs-2"></i>
@@ -40,13 +40,13 @@
           <div>
             <div class="fs-6 text-muted text-uppercase fw-semibold">Total Devices</div>
             <div class="fs-2 fw-bold text-primary">{{ total_devices }}</div>
-            <div class="fs-7 text-muted">{% if selected_role %}Role: {{ selected_role.name }}{% elif configured_roles %}Across {{ configured_roles|length }} configured roles{% else %}All active NetBox devices{% endif %}</div>
+            <div class="fs-7 text-muted">{% if selected_role %}Role: {{ selected_role.name }}{% elif configured_roles %}Across {{ configured_roles|length }} configured roles{% else %}All NetBox devices{% endif %}</div>
           </div>
         </div>
-      </div>
+      </a>
     </div>
     <div class="col-md-4">
-      <div class="card card-sm bg-body-tertiary border-0 shadow-sm">
+      <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?status=synced{% if selected_role_id %}&role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if status_filter == 'synced' %}border border-success border-2{% else %}border-0{% endif %}" title="Click to view synced devices">
         <div class="card-body d-flex align-items-center">
           <div class="avatar bg-success text-white p-3 rounded-circle me-3">
             <i class="mdi mdi-check-circle fs-2"></i>
@@ -54,24 +54,24 @@
           <div>
             <div class="fs-6 text-muted text-uppercase fw-semibold">Synced Devices</div>
             <div class="fs-2 fw-bold text-success">{{ synced_devices }}</div>
-            <div class="fs-7 text-muted">Found in LibreNMS</div>
+            <div class="fs-7 text-muted">Found in LibreNMS (Click to filter)</div>
           </div>
         </div>
-      </div>
+      </a>
     </div>
     <div class="col-md-4">
-      <div class="card card-sm bg-body-tertiary border-0 shadow-sm">
+      <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?status=pending{% if selected_role_id %}&role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if status_filter == 'pending' %}border border-danger border-2{% else %}border-0{% endif %}" title="Click to view devices pending sync">
         <div class="card-body d-flex align-items-center">
-          <div class="avatar bg-warning text-white p-3 rounded-circle me-3">
+          <div class="avatar bg-danger text-white p-3 rounded-circle me-3">
             <i class="mdi mdi-sync-alert fs-2"></i>
           </div>
           <div>
             <div class="fs-6 text-muted text-uppercase fw-semibold">Devices to be Synced</div>
-            <div class="fs-2 fw-bold text-warning">{{ devices_to_sync }}</div>
-            <div class="fs-7 text-muted">Pending push to LibreNMS</div>
+            <div class="fs-2 fw-bold text-danger">{{ devices_to_sync }}</div>
+            <div class="fs-7 text-muted">Pending push (Click to filter)</div>
           </div>
         </div>
-      </div>
+      </a>
     </div>
   </div>
 

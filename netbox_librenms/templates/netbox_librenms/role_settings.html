@@ -47,15 +47,17 @@
                 <td>
                   <a href="{{ item.role.get_absolute_url }}" class="fw-bold">{{ item.name }}</a>
                 </td>
-                <td><code>{{ item.slug }}</code></td>
+                <td><code class="fw-bold">{{ item.slug }}</code></td>
                 <td class="text-center">
-                  <span class="badge bg-secondary">{{ item.device_count }}</span>
+                  <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?role_id={{ item.id }}" class="badge bg-primary text-white text-decoration-none fw-bold px-3 py-2" style="font-size: 0.85rem;" title="View devices for {{ item.name }}">
+                    {{ item.device_count }} devices <i class="mdi mdi-arrow-right ms-1"></i>
+                  </a>
                 </td>
                 <td>
                   {% if item.is_selected %}
-                    <span class="badge bg-success">Selected for Sync</span>
+                    <span class="badge bg-success text-white fw-bold px-2.5 py-1.5" style="font-size: 0.82rem;"><i class="mdi mdi-check-circle me-1"></i> Selected for Sync</span>
                   {% else %}
-                    <span class="badge bg-light text-muted">Excluded</span>
+                    <span class="badge bg-secondary text-white fw-bold px-2.5 py-1.5" style="font-size: 0.82rem;"><i class="mdi mdi-minus-circle me-1"></i> Excluded</span>
                   {% endif %}
                 </td>
               </tr>

@@ -1405,17 +1405,7 @@ class DeviceSyncStatusView(View):
             # Default to configured roles if configured, unless user selected all or specific role
             netbox_devices = netbox_devices.filter(role_id__in=configured_role_ids)
 
-        per_page_str = request.GET.get('per_page', '50')
-        try:
-            per_page = int(per_page_str)
-            if per_page not in [25, 50, 100, 250, 500]:
-                per_page = 50
-        except ValueError:
-            per_page = 50
-
-        page_num = request.GET.get('page', 1)
-        paginator = Paginator(netbox_devices, per_page)
-        page_obj = paginator.get_page(page_num)
+        status_filter = request.GET.get('status') # 'synced', 'pending', or None
 
         lnms_map = {}
         if librenms_configured:
@@ -1424,8 +1414,10 @@ class DeviceSyncStatusView(View):
             except Exception as e:
                 messages.error(request, f"LibreNMS API Connection Error: {str(e)}")
 
-        device_rows = []
-        for dev in page_obj.object_list:
+        all_device_rows = []
+        synced_count = 0
+
+        for dev in netbox_devices:
             ip = ""
             if dev.primary_ip4 and dev.primary_ip4.address:
                 ip = str(dev.primary_ip4.address.ip)
@@ -1464,13 +1456,14 @@ class DeviceSyncStatusView(View):
 
             is_synced = bool(matched_lnms_dev)
             if is_synced:
+                synced_count += 1
                 status_label = "Synced"
                 status_class = "success"
             else:
                 status_label = "Pending Sync"
                 status_class = "warning" if snmp_type != "None" else "danger"
 
-            device_rows.append({
+            all_device_rows.append({
                 'device': dev,
                 'id': dev.id,
                 'name': dev.name,
@@ -1484,17 +1477,28 @@ class DeviceSyncStatusView(View):
                 'lnms_device': matched_lnms_dev
             })
 
-        total_devices = netbox_devices.count()
-        synced_count = 0
-        if lnms_map:
-            for dev in netbox_devices:
-                dev_ip = str(dev.primary_ip4.address.ip) if dev.primary_ip4 else (str(dev.primary_ip6.address.ip) if dev.primary_ip6 else "")
-                ip_clean = dev_ip.strip().lower()
-                name_clean = str(dev.name or "").strip().lower()
-                if lnms_map.get(ip_clean) or lnms_map.get(name_clean):
-                    synced_count += 1
-
+        total_devices = len(all_device_rows)
         pending_count = total_devices - synced_count
+
+        # Filter rows by status if status_filter param present
+        if status_filter == 'synced':
+            filtered_rows = [r for r in all_device_rows if r['is_synced']]
+        elif status_filter == 'pending':
+            filtered_rows = [r for r in all_device_rows if not r['is_synced']]
+        else:
+            filtered_rows = all_device_rows
+
+        per_page_str = request.GET.get('per_page', '50')
+        try:
+            per_page = int(per_page_str)
+            if per_page not in [25, 50, 100, 250, 500]:
+                per_page = 50
+        except ValueError:
+            per_page = 50
+
+        page_num = request.GET.get('page', 1)
+        paginator = Paginator(filtered_rows, per_page)
+        page_obj = paginator.get_page(page_num)
 
         configured_roles_objs = all_roles.filter(id__in=configured_role_ids) if configured_role_ids else None
         filter_roles = configured_roles_objs if configured_roles_objs else all_roles
@@ -1506,7 +1510,8 @@ class DeviceSyncStatusView(View):
             'configured_role_ids': configured_role_ids,
             'selected_role': filter_role,
             'selected_role_id': filter_role.id if filter_role else None,
-            'device_rows': device_rows,
+            'status_filter': status_filter,
+            'device_rows': page_obj.object_list,
             'page_obj': page_obj,
             'per_page': per_page,
             'total_devices': total_devices,
