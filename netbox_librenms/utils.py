@@ -498,3 +498,36 @@ class LibreNMSClient:
             logger.error(f"Failed to fetch all LibreNMS devices map: {str(e)}")
         return devices_map
 
+    def rename_device(self, device_id_or_old_ip, new_ip):
+        """
+        Renames a device hostname/IP in LibreNMS.
+        """
+        try:
+            # Route 1: PUT /devices/{id}/rename
+            payload = {"hostname": new_ip}
+            res = self._request('PUT', f"devices/{device_id_or_old_ip}/rename", json_data=payload)
+            if isinstance(res, dict) and res.get('status') == 'ok':
+                return res
+        except Exception:
+            pass
+        try:
+            # Route 2: PUT /devices/{id}
+            payload = {"field": "hostname", "value": new_ip}
+            res = self._request('PUT', f"devices/{device_id_or_old_ip}", json_data=payload)
+            if isinstance(res, dict) and res.get('status') == 'ok':
+                return res
+        except Exception:
+            pass
+        return None
+
+    def delete_device(self, device_id_or_ip):
+        """
+        Deletes a device from LibreNMS.
+        """
+        try:
+            return self._request('DELETE', f"devices/{device_id_or_ip}")
+        except Exception as e:
+            logger.error(f"Failed to delete LibreNMS device {device_id_or_ip}: {str(e)}")
+            return None
+
+
