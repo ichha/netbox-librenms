@@ -2,10 +2,36 @@ import logging
 from django.conf import settings
 from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
-from dcim.models import Device
+from dcim.models import Device, DeviceRole
+from users.models import UserConfig
 from .utils import LibreNMSClient
 
 logger = logging.getLogger('netbox_librenms.signals')
+
+
+def get_all_active_role_ids():
+    """
+    Combines configured roles from PLUGINS_CONFIG and user preferences stored
+    in UserConfig records to determine all active roles for sync.
+    """
+    role_ids = set()
+    config = settings.PLUGINS_CONFIG.get('netbox_librenms', {})
+    configured_roles = config.get('device_roles', []) or config.get('device_role_slugs', [])
+    if configured_roles:
+        try:
+            role_ids.update(DeviceRole.objects.filter(slug__in=configured_roles).values_list('id', flat=True))
+        except Exception:
+            pass
+
+    try:
+        for uc in UserConfig.objects.all():
+            val = uc.data.get('plugins', {}).get('netbox_librenms', {}).get('device_roles', [])
+            if val and isinstance(val, list):
+                role_ids.update([int(x) for x in val if str(x).isdigit()])
+    except Exception:
+        pass
+
+    return list(role_ids)
 
 
 @receiver(pre_save, sender=Device)
@@ -52,14 +78,10 @@ def auto_sync_device_to_librenms(sender, instance, created, **kwargs):
     if not ip:
         return
 
-    # Check configured device role filter if specified in settings
-    configured_roles = config.get('device_roles', []) or config.get('device_role_slugs', [])
-    if configured_roles and instance.role:
-        role_slug = getattr(instance.role, 'slug', '')
-        role_id_str = str(getattr(instance.role, 'id', ''))
-        configured_str_list = [str(x) for x in configured_roles]
-        if role_slug not in configured_roles and role_id_str not in configured_str_list:
-            return
+    # Check configured device role filter (from settings and UI selection)
+    active_role_ids = get_all_active_role_ids()
+    if active_role_ids and instance.role_id not in active_role_ids:
+        return
 
     client = LibreNMSClient()
     if not client.is_configured():
