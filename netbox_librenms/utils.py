@@ -237,7 +237,7 @@ class LibreNMSClient:
             return 0.0
 
     def get_port_statistics(self, device_id, port_name):
-        columns = "port_id,ifSpeed,ifName,ifDescr,ifAlias,ifInOctets_rate,ifOutOctets_rate"
+        columns = "port_id,ifSpeed,ifName,ifDescr,ifAlias,ifInOctets_rate,ifOutOctets_rate,ifInOctets_peak,ifOutOctets_peak"
         res = self._request('GET', f"devices/{device_id}/ports", params={'columns': columns})
         ports = res.get("ports", []) if isinstance(res, dict) else []
         
@@ -276,9 +276,13 @@ class LibreNMSClient:
             
         in_octets_rate = matched_port.get("ifInOctets_rate")
         out_octets_rate = matched_port.get("ifOutOctets_rate")
+        in_peak = matched_port.get("ifInOctets_peak")
+        out_peak = matched_port.get("ifOutOctets_peak")
         
         in_bps = 0.0
         out_bps = 0.0
+        in_peak_bps = 0.0
+        out_peak_bps = 0.0
         
         if in_octets_rate is not None:
             try:
@@ -300,9 +304,22 @@ class LibreNMSClient:
             if out_rate_str:
                 out_bps = self._parse_rate_str_to_bps(out_rate_str)
                 
+        if in_peak is not None:
+            try:
+                in_peak_bps = float(in_peak) * 8
+            except (ValueError, TypeError):
+                pass
+        if out_peak is not None:
+            try:
+                out_peak_bps = float(out_peak) * 8
+            except (ValueError, TypeError):
+                pass
+
         return {
             "in_bps": in_bps,
             "out_bps": out_bps,
+            "in_peak_bps": in_peak_bps,
+            "out_peak_bps": out_peak_bps,
             "port_id": matched_port.get("port_id"),
             "ifSpeed": matched_port.get("ifSpeed")
         }

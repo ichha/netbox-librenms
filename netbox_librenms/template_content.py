@@ -26,12 +26,16 @@ class InterfaceTrafficGraphExtension(PluginTemplateExtension):
         # Fetch current In/Out rates and Port Speed
         in_bps = 0.0
         out_bps = 0.0
+        in_peak_bps = 0.0
+        out_peak_bps = 0.0
         if_speed = 0.0
         try:
             port_stats = client.get_port_statistics(librenms_device['device_id'], interface.name)
             if port_stats:
                 in_bps = port_stats.get('in_bps', 0.0)
                 out_bps = port_stats.get('out_bps', 0.0)
+                in_peak_bps = port_stats.get('in_peak_bps', 0.0)
+                out_peak_bps = port_stats.get('out_peak_bps', 0.0)
                 if_speed = port_stats.get('ifSpeed')
         except Exception:
             pass
@@ -45,6 +49,8 @@ class InterfaceTrafficGraphExtension(PluginTemplateExtension):
             'interface_name': interface.name,
             'current_in_bps': in_bps,
             'current_out_bps': out_bps,
+            'in_peak_bps': in_peak_bps,
+            'out_peak_bps': out_peak_bps,
             'if_speed_bps': if_speed or 0.0,
         })
 

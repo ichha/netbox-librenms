@@ -127,7 +127,7 @@
             <div id="graph-hover-line-y" style="position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #22a6b3; display: none; pointer-events: none; z-index: 10;"></div>
             
             <!-- Hover Tooltip -->
-            <div id="graph-hover-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 0.725rem; font-family: monospace; border: 1px solid #22a6b3; box-shadow: 0 4px 15px rgba(0,0,0,0.3); pointer-events: none; z-index: 20; text-align: left; line-height: 1.4; min-width: 180px;"></div>
+            <div id="graph-hover-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 0.725rem; font-family: monospace; border: 1px solid #22a6b3; box-shadow: 0 4px 15px rgba(0,0,0,0.3); pointer-events: none; z-index: 20; text-align: left; line-height: 1.4; min-width: 190px;"></div>
         </div>
     </div>
 </div>
@@ -165,17 +165,26 @@
         const hoverTooltip = document.getElementById('graph-hover-tooltip');
 
         const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
+        const statsUrl = "{% url 'plugins:netbox_librenms:interface_librenms-uptime-status' pk=object.pk %}";
 
         let currentRange = "24h";
+        let downtimeData = [];
+        let currentDowntimeData = null;
 
-        // Read port speed and current rates passed from Django template context
+        // Read port speed, current rates, and peaks passed from Django template context
         const currentInBps = parseFloat("{{ current_in_bps|default:0.0 }}");
         const currentOutBps = parseFloat("{{ current_out_bps|default:0.0 }}");
+        const inPeakBps = parseFloat("{{ in_peak_bps|default:0.0 }}");
+        const outPeakBps = parseFloat("{{ out_peak_bps|default:0.0 }}");
         const ifSpeedBps = parseFloat("{{ if_speed_bps|default:0.0 }}");
 
         // Autoscale Y-Max calculation based on peak/headroom
         const maxCurrentBps = Math.max(currentInBps, currentOutBps);
-        let rawMaxBps = maxCurrentBps * 1.35; // 35% headroom to capture graph peaks
+        const maxPeakBps = Math.max(inPeakBps, outPeakBps);
+        
+        // Use peak rates for 24h+ ranges, or current rates as fallback
+        const comparisonBps = Math.max(maxCurrentBps, maxPeakBps);
+        let rawMaxBps = comparisonBps * 1.25; // 25% headroom to capture graph peaks
 
         if (rawMaxBps <= 0 || rawMaxBps > ifSpeedBps) {
             rawMaxBps = ifSpeedBps || 2 * 1000 * 1000 * 1000; // default to 2 Gbps fallback
@@ -183,11 +192,13 @@
 
         let yMaxVal = 2.0;
         let yUnitName = "Gbps";
+        let scaleDivider = 1000 * 1000 * 1000;
 
-        // Map calculated limits to clean RRDtool-style tick scales
+        // Map calculated limits to clean visual scales
         if (rawMaxBps >= 1000 * 1000 * 1000) {
             yMaxVal = rawMaxBps / (1000 * 1000 * 1000);
             yUnitName = "Gbps";
+            scaleDivider = 1000 * 1000 * 1000;
             const standardLimits = [1, 2, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 400, 500, 1000];
             let chosen = 100;
             for (let i = 0; i < standardLimits.length; i++) {
@@ -200,6 +211,7 @@
         } else if (rawMaxBps >= 1000 * 1000) {
             yMaxVal = rawMaxBps / (1000 * 1000);
             yUnitName = "Mbps";
+            scaleDivider = 1000 * 1000;
             const standardLimits = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
             let chosen = 100;
             for (let i = 0; i < standardLimits.length; i++) {
@@ -212,6 +224,7 @@
         } else {
             yMaxVal = Math.max(rawMaxBps, 1000) / 1000;
             yUnitName = "Kbps";
+            scaleDivider = 1000;
             yMaxVal = Math.ceil(yMaxVal / 10) * 10;
         }
 
@@ -240,6 +253,19 @@
             }
             src += "&_ts=" + new Date().getTime();
             imgEl.src = src;
+        }
+
+        async function fetchUptimeStats() {
+            try {
+                const res = await fetch(statsUrl);
+                if (res.ok) {
+                    const data = await res.json();
+                    downtimeData = data.downtimes || [];
+                    currentDowntimeData = data.current_downtime || null;
+                }
+            } catch (e) {
+                console.error("Failed to load uptime statistics:", e);
+            }
         }
 
         if (imgEl) {
@@ -347,8 +373,25 @@
                 };
                 const formattedTime = hoverDate.toLocaleDateString('en-US', dateOpts);
                 
-                // Calculate actual traffic value at the hovered cursor level
-                const usageVal = relY * yMaxVal;
+                // Check if the hovered time is within a downtime range
+                let isOffline = false;
+                if (downtimeData.length > 0) {
+                    for (let i = 0; i < downtimeData.length; i++) {
+                        const dt = downtimeData[i];
+                        const tDown = new Date(dt.down_time).getTime();
+                        const tUp = new Date(dt.up_time).getTime();
+                        if (hoverTimeMs >= tDown && hoverTimeMs <= tUp) {
+                            isOffline = true;
+                            break;
+                        }
+                    }
+                }
+                if (currentDowntimeData) {
+                    const tDown = new Date(currentDowntimeData.down_since).getTime();
+                    if (hoverTimeMs >= tDown) {
+                        isOffline = true;
+                    }
+                }
                 
                 // Update guides position
                 hoverLineX.style.left = `${mouseX}px`;
@@ -357,25 +400,58 @@
                 hoverLineY.style.top = `${mouseY}px`;
                 hoverLineY.style.display = 'block';
                 
-                // Position and populate Tooltip with both In and Out traffic labels
-                hoverTooltip.innerHTML = `
-                    <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #22a6b3;">
-                        <i class="mdi mdi-chart-line"></i> Aligned Traffic Stats
-                    </div>
-                    <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
-                    <div style="margin-bottom: 4px; color: #2ed573;"><strong>In Traffic:</strong> ${usageVal.toFixed(2)} ${yUnitName}</div>
-                    <div style="color: #a55eea;"><strong>Out Traffic:</strong> ${usageVal.toFixed(2)} ${yUnitName}</div>
-                `;
+                // Position and populate Tooltip
+                let tooltipHtml = '';
+                if (isOffline) {
+                    // LINK DOWN - Display 0.00 traffic
+                    tooltipHtml = `
+                        <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #ff4757;">
+                            <i class="mdi mdi-close-network"></i> Link Offline (Downtime)
+                        </div>
+                        <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
+                        <div style="margin-bottom: 4px; color: #2ed573;"><strong>Inbound:</strong> 0.00 ${yUnitName}</div>
+                        <div style="color: #a55eea;"><strong>Outbound:</strong> 0.00 ${yUnitName}</div>
+                    `;
+                } else {
+                    // LINK ACTIVE - Show Cursor Level, and actual current/peak rates
+                    const usageVal = relY * yMaxVal;
+                    const formattedInNow = (currentInBps / scaleDivider).toFixed(2);
+                    const formattedOutNow = (currentOutBps / scaleDivider).toFixed(2);
+                    const formattedInPeak = (inPeakBps / scaleDivider).toFixed(2);
+                    const formattedOutPeak = (outPeakBps / scaleDivider).toFixed(2);
+
+                    tooltipHtml = `
+                        <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #22a6b3;">
+                            <i class="mdi mdi-chart-line"></i> Aligned Traffic Stats
+                        </div>
+                        <div style="margin-bottom: 6px;"><strong>Time:</strong> ${formattedTime}</div>
+                        
+                        <div style="border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px; margin-bottom: 4px;">
+                            <strong>Cursor Level:</strong> <span style="font-weight: bold; color: #00d2d3;">${usageVal.toFixed(2)} ${yUnitName}</span>
+                        </div>
+                        
+                        <div style="font-size: 0.675rem; margin-bottom: 2px;">
+                            <span style="color: #2ed573; font-weight: bold;">● In Now:</span> ${formattedInNow} ${yUnitName}
+                            <span style="color: #2ed573; opacity: 0.7;">(Max: ${formattedInPeak})</span>
+                        </div>
+                        <div style="font-size: 0.675rem;">
+                            <span style="color: #a55eea; font-weight: bold;">● Out Now:</span> ${formattedOutNow} ${yUnitName}
+                            <span style="color: #a55eea; opacity: 0.7;">(Max: ${formattedOutPeak})</span>
+                        </div>
+                    `;
+                }
+                
+                hoverTooltip.innerHTML = tooltipHtml;
                 
                 let tooltipLeft = mouseX + 15;
-                if (tooltipLeft + 190 > rect.width) {
-                    tooltipLeft = mouseX - 190 - 15;
+                if (tooltipLeft + 230 > rect.width) {
+                    tooltipLeft = mouseX - 230 - 15;
                 }
                 hoverTooltip.style.left = `${tooltipLeft}px`;
                 
                 let tooltipTop = mouseY + 15;
-                if (tooltipTop + 100 > rect.height) {
-                    tooltipTop = rect.height - 100;
+                if (tooltipTop + 130 > rect.height) {
+                    tooltipTop = rect.height - 130;
                 }
                 hoverTooltip.style.top = `${tooltipTop}px`;
                 hoverTooltip.style.display = 'block';
@@ -394,7 +470,8 @@
             hoverTooltip.style.display = 'none';
         }
 
-        // Initial load
+        // Initial loads
         loadGraph("24h");
+        fetchUptimeStats();
     })();
 </script>
