@@ -81,14 +81,6 @@
             <button class="graph-btn" data-range="30d">30d</button>
             <button class="graph-btn" data-range="1y">1y</button>
             <button class="graph-btn" id="btn-custom-range" data-range="custom"><i class="mdi mdi-calendar-clock"></i> Custom</button>
-            
-            <span class="ms-2 me-1 text-white-50 fw-semibold" style="font-size: 0.7rem;">Y-Max:</span>
-            <input type="number" id="graph-y-max" step="any" style="width: 45px; height: 20px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 4px; padding: 0 4px; font-size: 0.7rem; text-align: center; font-weight: bold;" placeholder="Auto" />
-            <select id="graph-y-unit" style="height: 20px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 4px; padding: 0 2px; font-size: 0.7rem; font-weight: bold; cursor: pointer; line-height: 1;">
-                <option value="G">G</option>
-                <option value="M">M</option>
-                <option value="K">K</option>
-            </select>
         </div>
     </div>
     
@@ -166,8 +158,6 @@
         const customStartInput = document.getElementById('custom-start-time');
         const customEndInput = document.getElementById('custom-end-time');
         const btnApplyCustom = document.getElementById('btn-apply-custom-range');
-        const yMaxInput = document.getElementById('graph-y-max');
-        const yUnitSelect = document.getElementById('graph-y-unit');
 
         // Hover elements
         const hoverLineX = document.getElementById('graph-hover-line-x');
@@ -178,19 +168,51 @@
 
         let currentRange = "24h";
 
-        // Pre-fill default Y-Max based on physical port speed from NetBox context
-        // NetBox stores interface speed in kbps (e.g. 10000000 kbps = 10 Gbps)
-        const speedKbps = parseInt("{{ object.speed|default:0 }}");
-        if (speedKbps >= 1000000) {
-            yMaxInput.value = (speedKbps / 1000000).toFixed(0);
-            yUnitSelect.value = "G";
-        } else if (speedKbps > 0) {
-            yMaxInput.value = (speedKbps / 1000).toFixed(0);
-            yUnitSelect.value = "M";
+        // Read port speed and current rates passed from Django template context
+        const currentInBps = parseFloat("{{ current_in_bps|default:0.0 }}");
+        const currentOutBps = parseFloat("{{ current_out_bps|default:0.0 }}");
+        const ifSpeedBps = parseFloat("{{ if_speed_bps|default:0.0 }}");
+
+        // Autoscale Y-Max calculation based on peak/headroom
+        const maxCurrentBps = Math.max(currentInBps, currentOutBps);
+        let rawMaxBps = maxCurrentBps * 1.35; // 35% headroom to capture graph peaks
+
+        if (rawMaxBps <= 0 || rawMaxBps > ifSpeedBps) {
+            rawMaxBps = ifSpeedBps || 2 * 1000 * 1000 * 1000; // default to 2 Gbps fallback
+        }
+
+        let yMaxVal = 2.0;
+        let yUnitName = "Gbps";
+
+        // Map calculated limits to clean RRDtool-style tick scales
+        if (rawMaxBps >= 1000 * 1000 * 1000) {
+            yMaxVal = rawMaxBps / (1000 * 1000 * 1000);
+            yUnitName = "Gbps";
+            const standardLimits = [1, 2, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 400, 500, 1000];
+            let chosen = 100;
+            for (let i = 0; i < standardLimits.length; i++) {
+                if (standardLimits[i] >= yMaxVal) {
+                    chosen = standardLimits[i];
+                    break;
+                }
+            }
+            yMaxVal = chosen;
+        } else if (rawMaxBps >= 1000 * 1000) {
+            yMaxVal = rawMaxBps / (1000 * 1000);
+            yUnitName = "Mbps";
+            const standardLimits = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+            let chosen = 100;
+            for (let i = 0; i < standardLimits.length; i++) {
+                if (standardLimits[i] >= yMaxVal) {
+                    chosen = standardLimits[i];
+                    break;
+                }
+            }
+            yMaxVal = chosen;
         } else {
-            // Default fallback if no speed defined
-            yMaxInput.value = "2.0";
-            yUnitSelect.value = "G";
+            yMaxVal = Math.max(rawMaxBps, 1000) / 1000;
+            yUnitName = "Kbps";
+            yMaxVal = Math.ceil(yMaxVal / 10) * 10;
         }
 
         // Set default custom dates (start = 24h ago, end = now)
@@ -282,7 +304,7 @@
             const pctX = mouseX / rect.width;
             const pctY = mouseY / rect.height;
             
-            // Plot Area boundary boundaries for standard LibreNMS graphs
+            // Plot Area boundaries for standard LibreNMS RRDtool graphs
             const plotXStart = 0.093;
             const plotXEnd = 0.955;
             const plotYStart = 0.08;
@@ -325,16 +347,8 @@
                 };
                 const formattedTime = hoverDate.toLocaleDateString('en-US', dateOpts);
                 
-                // Calculate actual usage rate from user's custom scale setting
-                const yMax = parseFloat(yMaxInput.value) || 2.0;
-                const yUnit = yUnitSelect.value;
-                const usageVal = relY * yMax;
-                
-                // format suffix: Gbps, Mbps, Kbps
-                let suffix = "bps";
-                if (yUnit === "G") suffix = "Gbps";
-                else if (yUnit === "M") suffix = "Mbps";
-                else if (yUnit === "K") suffix = "Kbps";
+                // Calculate actual traffic value at the hovered cursor level
+                const usageVal = relY * yMaxVal;
                 
                 // Update guides position
                 hoverLineX.style.left = `${mouseX}px`;
@@ -343,13 +357,14 @@
                 hoverLineY.style.top = `${mouseY}px`;
                 hoverLineY.style.display = 'block';
                 
-                // Position and populate Tooltip
+                // Position and populate Tooltip with both In and Out traffic labels
                 hoverTooltip.innerHTML = `
                     <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #22a6b3;">
-                        <i class="mdi mdi-chart-line"></i> Interface Stats
+                        <i class="mdi mdi-chart-line"></i> Aligned Traffic Stats
                     </div>
                     <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
-                    <div><strong>Usage:</strong> ${usageVal.toFixed(2)} ${suffix}</div>
+                    <div style="margin-bottom: 4px; color: #2ed573;"><strong>In Traffic:</strong> ${usageVal.toFixed(2)} ${yUnitName}</div>
+                    <div style="color: #a55eea;"><strong>Out Traffic:</strong> ${usageVal.toFixed(2)} ${yUnitName}</div>
                 `;
                 
                 let tooltipLeft = mouseX + 15;
