@@ -400,6 +400,20 @@
                 hoverLineY.style.top = `${mouseY}px`;
                 hoverLineY.style.display = 'block';
                 
+                // Helper to format bps rate dynamically
+                function formatBps(bps) {
+                    if (bps === undefined || bps === null || isNaN(bps)) return "0.00 bps";
+                    if (bps >= 1e9) {
+                        return (bps / 1e9).toFixed(2) + " Gbps";
+                    } else if (bps >= 1e6) {
+                        return (bps / 1e6).toFixed(2) + " Mbps";
+                    } else if (bps >= 1e3) {
+                        return (bps / 1e3).toFixed(2) + " Kbps";
+                    } else {
+                        return bps.toFixed(2) + " bps";
+                    }
+                }
+
                 // Position and populate Tooltip
                 let tooltipHtml = '';
                 if (isOffline) {
@@ -409,16 +423,12 @@
                             <i class="mdi mdi-close-network"></i> Link Offline (Downtime)
                         </div>
                         <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
-                        <div style="margin-bottom: 4px; color: #2ed573;"><strong>Inbound:</strong> 0.00 ${yUnitName}</div>
-                        <div style="color: #a55eea;"><strong>Outbound:</strong> 0.00 ${yUnitName}</div>
+                        <div style="margin-bottom: 4px; color: #2ed573;"><strong>Inbound:</strong> 0.00 bps</div>
+                        <div style="color: #a55eea;"><strong>Outbound:</strong> 0.00 bps</div>
                     `;
                 } else {
                     // LINK ACTIVE - Show Cursor Level, and actual current/peak rates
-                    const usageVal = relY * yMaxVal;
-                    const formattedInNow = (currentInBps / scaleDivider).toFixed(2);
-                    const formattedOutNow = (currentOutBps / scaleDivider).toFixed(2);
-                    const formattedInPeak = (inPeakBps / scaleDivider).toFixed(2);
-                    const formattedOutPeak = (outPeakBps / scaleDivider).toFixed(2);
+                    const usageBps = relY * yMaxVal * scaleDivider;
 
                     tooltipHtml = `
                         <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #22a6b3;">
@@ -427,16 +437,16 @@
                         <div style="margin-bottom: 6px;"><strong>Time:</strong> ${formattedTime}</div>
                         
                         <div style="border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px; margin-bottom: 4px;">
-                            <strong>Cursor Level:</strong> <span style="font-weight: bold; color: #00d2d3;">${usageVal.toFixed(2)} ${yUnitName}</span>
+                            <strong>Cursor Level:</strong> <span style="font-weight: bold; color: #00d2d3;">${formatBps(usageBps)}</span>
                         </div>
                         
                         <div style="font-size: 0.675rem; margin-bottom: 2px;">
-                            <span style="color: #2ed573; font-weight: bold;">● In Now:</span> ${formattedInNow} ${yUnitName}
-                            <span style="color: #2ed573; opacity: 0.7;">(Max: ${formattedInPeak})</span>
+                            <span style="color: #2ed573; font-weight: bold;">● In Now:</span> ${formatBps(currentInBps)}
+                            <span style="color: #2ed573; opacity: 0.7;">(Max: ${formatBps(inPeakBps)})</span>
                         </div>
                         <div style="font-size: 0.675rem;">
-                            <span style="color: #a55eea; font-weight: bold;">● Out Now:</span> ${formattedOutNow} ${yUnitName}
-                            <span style="color: #a55eea; opacity: 0.7;">(Max: ${formattedOutPeak})</span>
+                            <span style="color: #a55eea; font-weight: bold;">● Out Now:</span> ${formatBps(currentOutBps)}
+                            <span style="color: #a55eea; opacity: 0.7;">(Max: ${formatBps(outPeakBps)})</span>
                         </div>
                     `;
                 }

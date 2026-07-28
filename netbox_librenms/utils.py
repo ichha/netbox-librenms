@@ -274,46 +274,45 @@ class LibreNMSClient:
             logger.warning(f"Port '{port_name}' not found for device '{device_id}' in LibreNMS.")
             return None
             
-        in_octets_rate = matched_port.get("ifInOctets_rate")
-        out_octets_rate = matched_port.get("ifOutOctets_rate")
-        in_peak = matched_port.get("ifInOctets_peak")
-        out_peak = matched_port.get("ifOutOctets_peak")
+        # Get rates using case-insensitive check and multiple keys
+        def get_float_val(d, keys):
+            for k in keys:
+                if d.get(k) is not None:
+                    try:
+                        return float(d.get(k))
+                    except (ValueError, TypeError):
+                        pass
+                for dk, dv in d.items():
+                    if dk.lower() == k.lower() and dv is not None:
+                        try:
+                            return float(dv)
+                        except (ValueError, TypeError):
+                            pass
+            return 0.0
+
+        in_octets_rate = get_float_val(matched_port, ["ifInOctets_rate", "ifinoctets_rate", "in_rate"])
+        out_octets_rate = get_float_val(matched_port, ["ifOutOctets_rate", "ifoutoctets_rate", "out_rate"])
+        in_peak = get_float_val(matched_port, ["ifInOctets_peak", "ifinoctets_peak", "in_peak"])
+        out_peak = get_float_val(matched_port, ["ifOutOctets_peak", "ifoutoctets_peak", "out_peak"])
         
-        in_bps = 0.0
-        out_bps = 0.0
-        in_peak_bps = 0.0
-        out_peak_bps = 0.0
+        in_bps = in_octets_rate * 8
+        out_bps = out_octets_rate * 8
+        in_peak_bps = in_peak * 8
+        out_peak_bps = out_peak * 8
         
-        if in_octets_rate is not None:
-            try:
-                in_bps = float(in_octets_rate) * 8
-            except (ValueError, TypeError):
-                pass
-        else:
-            in_rate_str = matched_port.get("in_rate")
-            if in_rate_str:
-                in_bps = self._parse_rate_str_to_bps(in_rate_str)
-                
-        if out_octets_rate is not None:
-            try:
-                out_bps = float(out_octets_rate) * 8
-            except (ValueError, TypeError):
-                pass
-        else:
-            out_rate_str = matched_port.get("out_rate")
-            if out_rate_str:
-                out_bps = self._parse_rate_str_to_bps(out_rate_str)
-                
-        if in_peak is not None:
-            try:
-                in_peak_bps = float(in_peak) * 8
-            except (ValueError, TypeError):
-                pass
-        if out_peak is not None:
-            try:
-                out_peak_bps = float(out_peak) * 8
-            except (ValueError, TypeError):
-                pass
+        # If rates are very small, try parsing from rate string if present (e.g. "1.85 Gbps" or "19.96 kbps")
+        if in_bps == 0:
+            for k in ["in_rate", "in_rate_str"]:
+                val_str = matched_port.get(k)
+                if val_str:
+                    in_bps = self._parse_rate_str_to_bps(str(val_str))
+                    break
+        if out_bps == 0:
+            for k in ["out_rate", "out_rate_str"]:
+                val_str = matched_port.get(k)
+                if val_str:
+                    out_bps = self._parse_rate_str_to_bps(str(val_str))
+                    break
 
         return {
             "in_bps": in_bps,
