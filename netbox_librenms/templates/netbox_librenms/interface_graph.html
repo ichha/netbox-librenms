@@ -75,6 +75,16 @@
         border: 1px solid #eee;
         padding: 8px;
     }
+    .custom-time-panel {
+        padding: 10px 14px;
+        background: #fafafa;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+    }
 </style>
 
 <div class="card librenms-graph-card librenms-traffic-card" id="librenms-traffic-card">
@@ -89,7 +99,21 @@
             <button class="graph-btn" data-range="7d">7d</button>
             <button class="graph-btn" data-range="30d">30d</button>
             <button class="graph-btn" data-range="1y">1y</button>
+            <button class="graph-btn" data-range="custom">Custom</button>
         </div>
+    </div>
+    
+    <!-- Custom Time Range Collapsible Input Panel -->
+    <div id="custom-time-inputs" class="custom-time-panel d-none">
+        <div class="d-flex align-items-center gap-2">
+            <label for="custom-start" class="form-label mb-0 fw-semibold text-muted" style="font-size: 0.8rem;">Start:</label>
+            <input type="datetime-local" id="custom-start" class="form-control form-control-sm" style="width: auto; height: 30px; font-size: 0.8rem; padding: 2px 6px;" />
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <label for="custom-end" class="form-label mb-0 fw-semibold text-muted" style="font-size: 0.8rem;">End:</label>
+            <input type="datetime-local" id="custom-end" class="form-control form-control-sm" style="width: auto; height: 30px; font-size: 0.8rem; padding: 2px 6px;" />
+        </div>
+        <button id="apply-custom-range" class="btn btn-sm btn-primary fw-semibold" style="height: 30px; font-size: 0.8rem; padding: 4px 12px; border-radius: 4px;">Apply</button>
     </div>
     
     <div class="graph-container">
@@ -110,8 +134,11 @@
         </div>
 
         <!-- Graph Image Wrapper -->
-        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none">
-            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto;" />
+        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none" style="position: relative; overflow: hidden; display: block; width: 100%;">
+            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto; display: block;" />
+            <!-- Crosshair overlay elements -->
+            <div id="crosshair-x" style="position: absolute; width: 1px; background-color: rgba(220, 53, 69, 0.85); pointer-events: none; display: none; z-index: 10;"></div>
+            <div id="crosshair-tooltip" style="position: absolute; background: #1e293b; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; pointer-events: none; display: none; z-index: 11; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.15); font-weight: 500;"></div>
         </div>
     </div>
 </div>
@@ -140,9 +167,30 @@
         const errorMsgEl = document.getElementById('librenms-error-msg');
         const wrapperEl = document.getElementById('librenms-graph-wrapper');
         const rangeButtons = document.querySelectorAll('.graph-btn');
+        
+        const customInputsEl = document.getElementById('custom-time-inputs');
+        const startInputEl = document.getElementById('custom-start');
+        const endInputEl = document.getElementById('custom-end');
+        const applyBtnEl = document.getElementById('apply-custom-range');
+        
+        const crosshairLine = document.getElementById('crosshair-x');
+        const crosshairTooltip = document.getElementById('crosshair-tooltip');
 
         const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
         let currentRange = "24h";
+
+        // Pre-fill datetime-local inputs with local timezone defaults
+        const now = new Date();
+        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        
+        function formatDateTimeLocal(date) {
+            const tzoffset = date.getTimezoneOffset() * 60000;
+            const localISOTime = (new Date(date.getTime() - tzoffset)).toISOString().slice(0, -1);
+            return localISOTime.substring(0, 16);
+        }
+        
+        startInputEl.value = formatDateTimeLocal(oneDayAgo);
+        endInputEl.value = formatDateTimeLocal(now);
 
         function loadGraph(range) {
             if (!imgEl) return;
@@ -150,8 +198,16 @@
             errorEl.classList.add('d-none');
             wrapperEl.classList.add('d-none');
 
-            // Force a cache-busting timestamp
-            imgEl.src = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
+            let queryUrl = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
+            if (range === "custom") {
+                const startSecs = Math.floor(new Date(startInputEl.value).getTime() / 1000);
+                const endSecs = Math.floor(new Date(endInputEl.value).getTime() / 1000);
+                if (startSecs && endSecs) {
+                    queryUrl += "&from=" + startSecs + "&to=" + endSecs;
+                }
+            }
+
+            imgEl.src = queryUrl;
         }
 
         if (imgEl) {
@@ -178,6 +234,90 @@
                     errorMsgEl.textContent = "Failed to connect to LibreNMS or retrieve graph details.";
                 }
             };
+
+            // Crosshair interaction on mousemove over the graph image
+            imgEl.addEventListener('mousemove', function(e) {
+                const rect = imgEl.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const relX = x / rect.width;
+                
+                // RRDTool graph area is roughly between X = 14% and X = 95.5%
+                if (relX >= 0.14 && relX <= 0.955) {
+                    const lineX = x + imgEl.offsetLeft;
+                    
+                    crosshairLine.style.left = lineX + 'px';
+                    crosshairLine.style.top = imgEl.offsetTop + 'px';
+                    crosshairLine.style.height = imgEl.offsetHeight + 'px';
+                    crosshairLine.style.display = 'block';
+
+                    const t_ratio = (relX - 0.14) / (0.955 - 0.14);
+                    const timeStr = calculateTimeAt(t_ratio);
+
+                    crosshairTooltip.style.left = (lineX + 12) + 'px';
+                    const cursorY = e.clientY - rect.top;
+                    crosshairTooltip.style.top = (cursorY + imgEl.offsetTop - 15) + 'px';
+                    crosshairTooltip.textContent = timeStr;
+                    crosshairTooltip.style.display = 'block';
+                } else {
+                    crosshairLine.style.display = 'none';
+                    crosshairTooltip.style.display = 'none';
+                }
+            });
+
+            imgEl.addEventListener('mouseleave', function() {
+                crosshairLine.style.display = 'none';
+                crosshairTooltip.style.display = 'none';
+            });
+        }
+
+        function calculateTimeAt(t_ratio) {
+            let startTime, endTime;
+            const now = new Date();
+            
+            if (currentRange === "24h") {
+                startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                endTime = now;
+            } else if (currentRange === "48h") {
+                startTime = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+                endTime = now;
+            } else if (currentRange === "7d") {
+                startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                endTime = now;
+            } else if (currentRange === "30d") {
+                startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                endTime = now;
+            } else if (currentRange === "1y") {
+                startTime = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+                endTime = now;
+            } else if (currentRange === "custom") {
+                startTime = startInputEl.value ? new Date(startInputEl.value) : new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                endTime = endInputEl.value ? new Date(endInputEl.value) : now;
+            } else {
+                startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                endTime = now;
+            }
+
+            const duration = endTime.getTime() - startTime.getTime();
+            const hoveredTime = new Date(startTime.getTime() + t_ratio * duration);
+            
+            const hours = String(hoveredTime.getHours()).padStart(2, '0');
+            const minutes = String(hoveredTime.getMinutes()).padStart(2, '0');
+            
+            if (duration <= 48 * 60 * 60 * 1000) {
+                const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                const dayName = dayNames[hoveredTime.getDay()];
+                return `${dayName} ${hours}:${minutes}`;
+            } else if (duration <= 30 * 24 * 60 * 60 * 1000) {
+                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                const monthName = monthNames[hoveredTime.getMonth()];
+                const day = hoveredTime.getDate();
+                return `${monthName} ${day} ${hours}:${minutes}`;
+            } else {
+                const year = hoveredTime.getFullYear();
+                const month = String(hoveredTime.getMonth() + 1).padStart(2, '0');
+                const day = String(hoveredTime.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day} ${hours}:${minutes}`;
+            }
         }
 
         rangeButtons.forEach(btn => {
@@ -186,8 +326,19 @@
                 this.classList.add('active');
                 
                 const range = this.getAttribute('data-range');
-                loadGraph(range);
+                currentRange = range;
+
+                if (range === "custom") {
+                    customInputsEl.classList.remove('d-none');
+                } else {
+                    customInputsEl.classList.add('d-none');
+                    loadGraph(range);
+                }
             });
+        });
+
+        applyBtnEl.addEventListener('click', function() {
+            loadGraph("custom");
         });
 
         // Initial load
