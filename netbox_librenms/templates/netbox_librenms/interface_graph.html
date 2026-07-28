@@ -141,11 +141,11 @@
             }
         }
         const cardEl = document.getElementById("librenms-traffic-card");
-        if (cardEl) {
-            const column = cardEl.closest('.col') || cardEl.closest('[class*="col-"]') || cardEl.parentElement;
-            if (column) {
-                column.insertBefore(cardEl, column.firstChild);
-            }
+        if (!cardEl) return;
+
+        const column = cardEl.closest('.col') || cardEl.closest('[class*="col-"]') || cardEl.parentElement;
+        if (column) {
+            column.insertBefore(cardEl, column.firstChild);
         }
 
         const imgEl = document.getElementById('librenms-interface-graph-img');
