@@ -20,6 +20,23 @@
         justify-content: space-between;
         align-items: center;
     }
+    .librenms-status-pulse {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+    }
+    .status-up {
+        background-color: #2ed573;
+        box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7);
+        animation: pulse-green 2s infinite;
+    }
+    @keyframes pulse-green {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(46, 213, 115, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0); }
+    }
     .graph-container {
         padding: 12px;
         text-align: center;
@@ -31,7 +48,6 @@
         flex-wrap: wrap;
         gap: 4px;
         justify-content: center;
-        align-items: center;
     }
     .graph-btn {
         background-color: rgba(255, 255, 255, 0.15);
@@ -59,19 +75,12 @@
         border: 1px solid #eee;
         padding: 8px;
     }
-    .custom-range-panel {
-        background: rgba(0, 0, 0, 0.03);
-        border-radius: 8px;
-        padding: 10px;
-        margin-top: 8px;
-        border: 1px solid rgba(0, 0, 0, 0.05);
-    }
 </style>
 
 <div class="card librenms-graph-card librenms-traffic-card" id="librenms-traffic-card">
     <div class="librenms-graph-card-header">
         <div class="d-flex align-items-center">
-            <span class="librenms-status-pulse" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background-color: #2ed573;"></span>
+            <span class="librenms-status-pulse status-up"></span>
             <span>LibreNMS Interface Traffic</span>
         </div>
         <div class="graph-controls">
@@ -80,28 +89,10 @@
             <button class="graph-btn" data-range="7d">7d</button>
             <button class="graph-btn" data-range="30d">30d</button>
             <button class="graph-btn" data-range="1y">1y</button>
-            <button class="graph-btn" id="btn-custom-range" data-range="custom"><i class="mdi mdi-calendar-clock"></i> Custom</button>
         </div>
     </div>
     
     <div class="graph-container">
-        <!-- Custom Range Date Time Pickers -->
-        <div id="custom-range-panel" class="custom-range-panel d-none text-start">
-            <div class="row g-2 align-items-end">
-                <div class="col-sm-5">
-                    <label class="form-label fs-7 text-muted fw-bold">Start Date & Time</label>
-                    <input type="datetime-local" id="custom-start-time" class="form-control form-control-sm" />
-                </div>
-                <div class="col-sm-5">
-                    <label class="form-label fs-7 text-muted fw-bold">End Date & Time</label>
-                    <input type="datetime-local" id="custom-end-time" class="form-control form-control-sm" />
-                </div>
-                <div class="col-sm-2 d-grid">
-                    <button type="button" id="btn-apply-custom-range" class="btn btn-sm btn-primary fw-bold text-white">Apply</button>
-                </div>
-            </div>
-        </div>
-
         <!-- Loading Spinner -->
         <div id="librenms-loading" class="d-flex flex-column justify-content-center align-items-center py-5">
             <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;">
@@ -118,22 +109,16 @@
             <p id="librenms-error-msg" class="mb-0">Failed to load LibreNMS graph.</p>
         </div>
 
-        <!-- Graph Image Wrapper with Interactive Hover Elements -->
-        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none position-relative" style="user-select: none; cursor: crosshair;">
-            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto; display: block;" />
-            
-            <!-- Hover Guides -->
-            <div id="graph-hover-line-x" style="position: absolute; top: 0; bottom: 0; width: 1px; border-left: 1px dashed #22a6b3; display: none; pointer-events: none; z-index: 10;"></div>
-            <div id="graph-hover-line-y" style="position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #22a6b3; display: none; pointer-events: none; z-index: 10;"></div>
-            
-            <!-- Hover Tooltip -->
-            <div id="graph-hover-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 0.725rem; font-family: monospace; border: 1px solid #22a6b3; box-shadow: 0 4px 15px rgba(0,0,0,0.3); pointer-events: none; z-index: 20; text-align: left; line-height: 1.4; min-width: 190px;"></div>
+        <!-- Graph Image Wrapper -->
+        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none">
+            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto;" />
         </div>
     </div>
 </div>
 
 <script>
     (function() {
+        // De-duplicate the card if NetBox renders it on multiple injection hooks
         const cards = document.querySelectorAll('.librenms-traffic-card');
         if (cards.length > 1) {
             for (let i = 1; i < cards.length; i++) {
@@ -141,11 +126,12 @@
             }
         }
         const cardEl = document.getElementById("librenms-traffic-card");
-        if (!cardEl) return;
-
-        const column = cardEl.closest('.col') || cardEl.closest('[class*="col-"]') || cardEl.parentElement;
-        if (column) {
-            column.insertBefore(cardEl, column.firstChild);
+        if (cardEl) {
+            // Find the Bootstrap column container (the right column) and move the card to the top
+            const column = cardEl.closest('.col') || cardEl.closest('[class*="col-"]') || cardEl.parentElement;
+            if (column) {
+                column.insertBefore(cardEl, column.firstChild);
+            }
         }
 
         const imgEl = document.getElementById('librenms-interface-graph-img');
@@ -154,118 +140,18 @@
         const errorMsgEl = document.getElementById('librenms-error-msg');
         const wrapperEl = document.getElementById('librenms-graph-wrapper');
         const rangeButtons = document.querySelectorAll('.graph-btn');
-        const customRangePanel = document.getElementById('custom-range-panel');
-        const customStartInput = document.getElementById('custom-start-time');
-        const customEndInput = document.getElementById('custom-end-time');
-        const btnApplyCustom = document.getElementById('btn-apply-custom-range');
-
-        // Hover elements
-        const hoverLineX = document.getElementById('graph-hover-line-x');
-        const hoverLineY = document.getElementById('graph-hover-line-y');
-        const hoverTooltip = document.getElementById('graph-hover-tooltip');
 
         const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
-        const statsUrl = "{% url 'plugins:netbox_librenms:interface_librenms-uptime-status' pk=object.pk %}";
-
         let currentRange = "24h";
-        let downtimeData = [];
-        let currentDowntimeData = null;
 
-        // Read port speed, current rates, and peaks passed from Django template context
-        const currentInBps = parseFloat("{{ current_in_bps|default:0.0 }}");
-        const currentOutBps = parseFloat("{{ current_out_bps|default:0.0 }}");
-        const inPeakBps = parseFloat("{{ in_peak_bps|default:0.0 }}");
-        const outPeakBps = parseFloat("{{ out_peak_bps|default:0.0 }}");
-        const ifSpeedBps = parseFloat("{{ if_speed_bps|default:0.0 }}");
-
-        // Autoscale Y-Max calculation based on peak/headroom
-        const maxCurrentBps = Math.max(currentInBps, currentOutBps);
-        const maxPeakBps = Math.max(inPeakBps, outPeakBps);
-        
-        // Use peak rates for 24h+ ranges, or current rates as fallback
-        const comparisonBps = Math.max(maxCurrentBps, maxPeakBps);
-        let rawMaxBps = comparisonBps * 1.25; // 25% headroom to capture graph peaks
-
-        if (rawMaxBps <= 0 || rawMaxBps > ifSpeedBps) {
-            rawMaxBps = ifSpeedBps || 2 * 1000 * 1000 * 1000; // default to 2 Gbps fallback
-        }
-
-        let yMaxVal = 2.0;
-        let yUnitName = "Gbps";
-        let scaleDivider = 1000 * 1000 * 1000;
-
-        // Map calculated limits to clean visual scales
-        if (rawMaxBps >= 1000 * 1000 * 1000) {
-            yMaxVal = rawMaxBps / (1000 * 1000 * 1000);
-            yUnitName = "Gbps";
-            scaleDivider = 1000 * 1000 * 1000;
-            const standardLimits = [1, 2, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 400, 500, 1000];
-            let chosen = 100;
-            for (let i = 0; i < standardLimits.length; i++) {
-                if (standardLimits[i] >= yMaxVal) {
-                    chosen = standardLimits[i];
-                    break;
-                }
-            }
-            yMaxVal = chosen;
-        } else if (rawMaxBps >= 1000 * 1000) {
-            yMaxVal = rawMaxBps / (1000 * 1000);
-            yUnitName = "Mbps";
-            scaleDivider = 1000 * 1000;
-            const standardLimits = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
-            let chosen = 100;
-            for (let i = 0; i < standardLimits.length; i++) {
-                if (standardLimits[i] >= yMaxVal) {
-                    chosen = standardLimits[i];
-                    break;
-                }
-            }
-            yMaxVal = chosen;
-        } else {
-            yMaxVal = Math.max(rawMaxBps, 1000) / 1000;
-            yUnitName = "Kbps";
-            scaleDivider = 1000;
-            yMaxVal = Math.ceil(yMaxVal / 10) * 10;
-        }
-
-        // Set default custom dates (start = 24h ago, end = now)
-        const now = new Date();
-        const past24h = new Date(now.getTime() - (24 * 60 * 60 * 1000));
-        
-        function formatDateTimeLocal(date) {
-            const pad = (n) => String(n).padStart(2, '0');
-            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-        }
-        
-        customStartInput.value = formatDateTimeLocal(past24h);
-        customEndInput.value = formatDateTimeLocal(now);
-
-        function loadGraph(range, customParams = '') {
+        function loadGraph(range) {
             if (!imgEl) return;
-            currentRange = range;
             loadingEl.classList.remove('d-none');
             errorEl.classList.add('d-none');
             wrapperEl.classList.add('d-none');
 
-            let src = baseUrl + "?range=" + range;
-            if (customParams) {
-                src += customParams;
-            }
-            src += "&_ts=" + new Date().getTime();
-            imgEl.src = src;
-        }
-
-        async function fetchUptimeStats() {
-            try {
-                const res = await fetch(statsUrl);
-                if (res.ok) {
-                    const data = await res.json();
-                    downtimeData = data.downtimes || [];
-                    currentDowntimeData = data.current_downtime || null;
-                }
-            } catch (e) {
-                console.error("Failed to load uptime statistics:", e);
-            }
+            // Force a cache-busting timestamp
+            imgEl.src = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
         }
 
         if (imgEl) {
@@ -300,141 +186,11 @@
                 this.classList.add('active');
                 
                 const range = this.getAttribute('data-range');
-                if (range === 'custom') {
-                    customRangePanel.classList.remove('d-none');
-                } else {
-                    customRangePanel.classList.add('d-none');
-                    loadGraph(range);
-                }
+                loadGraph(range);
             });
         });
 
-        btnApplyCustom.addEventListener('click', function() {
-            const startVal = customStartInput.value;
-            const endVal = customEndInput.value;
-            if (!startVal) return;
-            
-            const formatTime = (isoStr) => isoStr.replace('T', ' ');
-            const params = `&from=${encodeURIComponent(formatTime(startVal))}` + (endVal ? `&to=${encodeURIComponent(formatTime(endVal))}` : '');
-            loadGraph('custom', params);
-        });
-
-        // Graph Interactive Mouse Hover Logic
-        wrapperEl.addEventListener('mousemove', function(e) {
-            if (!imgEl || loadingEl.classList.contains('d-none') === false) return;
-            
-            const rect = imgEl.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            
-            const pctX = mouseX / rect.width;
-            const pctY = mouseY / rect.height;
-            
-            // Plot Area boundaries for standard LibreNMS RRDtool graphs
-            const plotXStart = 0.093;
-            const plotXEnd = 0.955;
-            const plotYStart = 0.08;
-            const plotYEnd = 0.765;
-            
-            if (pctX >= plotXStart && pctX <= plotXEnd && pctY >= plotYStart && pctY <= plotYEnd) {
-                // Calculate position relative to the inner plot area (0 to 1)
-                const relX = (pctX - plotXStart) / (plotXEnd - plotXStart);
-                const relY = (plotYEnd - pctY) / (plotYEnd - plotYStart); // 0 at bottom, 1 at top
-                
-                // Calculate timestamp
-                let endTime = new Date();
-                let startTime = new Date(endTime.getTime() - (24 * 60 * 60 * 1000));
-                
-                if (currentRange === '48h') {
-                    startTime = new Date(endTime.getTime() - (48 * 60 * 60 * 1000));
-                } else if (currentRange === '7d') {
-                    startTime = new Date(endTime.getTime() - (7 * 24 * 60 * 60 * 1000));
-                } else if (currentRange === '30d') {
-                    startTime = new Date(endTime.getTime() - (30 * 24 * 60 * 60 * 1000));
-                } else if (currentRange === '1y') {
-                    startTime = new Date(endTime.getTime() - (365 * 24 * 60 * 60 * 1000));
-                } else if (currentRange === 'custom') {
-                    startTime = new Date(customStartInput.value);
-                    endTime = customEndInput.value ? new Date(customEndInput.value) : new Date();
-                }
-                
-                const hoverTimeMs = startTime.getTime() + relX * (endTime.getTime() - startTime.getTime());
-                const hoverDate = new Date(hoverTimeMs);
-                
-                // Format hover Date and Time
-                const dateOpts = { 
-                    weekday: 'short', 
-                    month: 'short', 
-                    day: 'numeric', 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: true 
-                };
-                const formattedTime = hoverDate.toLocaleDateString('en-US', dateOpts);
-                
-                // Check if the hovered time is within a downtime range
-                let isOffline = false;
-                if (downtimeData.length > 0) {
-                    for (let i = 0; i < downtimeData.length; i++) {
-                        const dt = downtimeData[i];
-                        const tDown = new Date(dt.down_time).getTime();
-                        const tUp = new Date(dt.up_time).getTime();
-                        if (hoverTimeMs >= tDown && hoverTimeMs <= tUp) {
-                            isOffline = true;
-                            break;
-                        }
-                    }
-                }
-                if (currentDowntimeData) {
-                    const tDown = new Date(currentDowntimeData.down_since).getTime();
-                    if (hoverTimeMs >= tDown) {
-                        isOffline = true;
-                    }
-                }
-                
-                // Update guides position
-                hoverLineX.style.left = `${mouseX}px`;
-                hoverLineX.style.display = 'block';
-                
-                hoverLineY.style.display = 'none'; // Hide horizontal line as we only show Time
-                
-                // Position and populate Tooltip with only the Time
-                hoverTooltip.innerHTML = `
-                    <div style="font-weight: bold; color: #22a6b3; font-size: 0.725rem; white-space: nowrap;">
-                        <i class="mdi mdi-clock-outline"></i> ${formattedTime}
-                    </div>
-                `;
-                
-                let tooltipLeft = mouseX + 15;
-                if (tooltipLeft + 160 > rect.width) {
-                    tooltipLeft = mouseX - 160 - 15;
-                }
-                hoverTooltip.style.left = `${tooltipLeft}px`;
-                
-                let tooltipTop = mouseY + 15;
-                if (tooltipTop + 45 > rect.height) {
-                    tooltipTop = rect.height - 45;
-                }
-                hoverTooltip.style.top = `${tooltipTop}px`;
-                hoverTooltip.style.display = 'block';
-            } else {
-                hideHoverGuides();
-            }
-        });
-        
-        wrapperEl.addEventListener('mouseleave', function() {
-            hideHoverGuides();
-        });
-        
-        function hideHoverGuides() {
-            hoverLineX.style.display = 'none';
-            hoverLineY.style.display = 'none';
-            hoverTooltip.style.display = 'none';
-        }
-
-        // Initial loads
-        loadGraph("24h");
-        fetchUptimeStats();
+        // Initial load
+        loadGraph(currentRange);
     })();
 </script>

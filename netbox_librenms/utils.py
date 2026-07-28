@@ -20,12 +20,12 @@ class LibreNMSClient:
     def is_configured(self):
         return bool(self.base_url and self.api_token)
 
-    def _request(self, method, endpoint, params=None, stream=False, json_data=None, ignore_circuit_breaker=False):
+    def _request(self, method, endpoint, params=None, stream=False, json_data=None):
         if not self.is_configured():
             raise ValueError("LibreNMS plugin is not configured in PLUGINS_CONFIG.")
         
         # Simple circuit breaker check
-        if not ignore_circuit_breaker and cache.get("librenms_circuit_broken"):
+        if cache.get("librenms_circuit_broken"):
             raise requests.exceptions.ConnectionError("LibreNMS connection is temporarily suspended (circuit breaker active).")
 
         url = f"{self.base_url}/api/v0/{endpoint.lstrip('/')}"
@@ -54,7 +54,7 @@ class LibreNMSClient:
                 logger.error(f"LibreNMS API Error for {url}: {str(e)}")
                 
                 # If it's a connection error or timeout, trigger circuit breaker
-                if not ignore_circuit_breaker and (status_code is None or status_code >= 500):
+                if status_code is None or status_code >= 500:
                     logger.warning("LibreNMS connection error/timeout. Activating circuit breaker for 30 seconds.")
                     cache.set("librenms_circuit_broken", True, 30)
             
@@ -78,18 +78,49 @@ class LibreNMSClient:
 
         dev = None
         try:
-            # Direct retrieval only
-            res = self._request('GET', f"devices/{ip_or_name}", ignore_circuit_breaker=True)
+            # First try direct retrieval
+            res = self._request('GET', f"devices/{ip_or_name}")
             if res.get('status') == 'ok' and res.get('devices'):
                 dev = res['devices'][0]
         except Exception:
             pass
+        
+        if not dev:
+            # If that fails, search the global devices list
+            try:
+                # Cache the list of all devices for 60 seconds to avoid repeating heavy load
+                devices_list_key = "librenms_all_devices_list"
+                all_devices = cache.get(devices_list_key)
+                if all_devices is None:
+                    res = self._request('GET', 'devices')
+                    if res.get('status') == 'ok' and res.get('devices'):
+                        all_devices = res['devices']
+                        cache.set(devices_list_key, all_devices, 60)
+                    else:
+                        all_devices = []
+
+                if all_devices:
+                    target_lower = str(ip_or_name).lower().strip()
+                    for d in all_devices:
+                        hostname = str(d.get('hostname') or '').lower().strip()
+                        sysname = str(d.get('sysName') or '').lower().strip()
+                        display = str(d.get('display') or '').lower().strip()
+                        ip = str(d.get('ip') or '').lower().strip()
+                        
+                        if (target_lower == hostname or 
+                            target_lower == sysname or 
+                            target_lower == display or 
+                            target_lower == ip):
+                            dev = d
+                            break
+            except Exception:
+                pass
             
         if dev:
-            cache.set(cache_key, dev, 1800) # Cache hit for 30 minutes
+            cache.set(cache_key, dev, 300) # Cache hit for 5 minutes
             return dev
         else:
-            cache.set(cache_key, "NOT_FOUND", 1800) # Cache miss for 30 minutes
+            cache.set(cache_key, "NOT_FOUND", 60) # Cache miss for 1 minute
             return None
 
     def get_device_ports(self, hostname_or_id):
@@ -188,140 +219,6 @@ class LibreNMSClient:
         }
         return self._request('GET', endpoint, params=params, stream=True)
 
-    def _normalize_interface_name(self, name):
-        if not name:
-            return ""
-        n = name.lower().strip()
-        n = "".join(c for c in n if c.isalnum() or c == '/')
-        
-        prefixes = {
-            "hundredgigabitethernet": "hu",
-            "hundredgige": "hu",
-            "fortygigabitethernet": "fo",
-            "fortygige": "fo",
-            "fiftygigabitethernet": "fi",
-            "fiftygige": "fi",
-            "tengigabitethernet": "te",
-            "tengige": "te",
-            "gigabitethernet": "ge",
-            "fastethernet": "fa",
-            "ethernet": "eth",
-            "portchannel": "po",
-            "loopback": "lo",
-            "vlan": "vl",
-            "gi": "ge",
-        }
-        for full, short in prefixes.items():
-            if n.startswith(full):
-                n = short + n[len(full):]
-                break
-        return n
-
-    def _parse_rate_str_to_bps(self, rate_str):
-        try:
-            parts = rate_str.strip().split()
-            if not parts:
-                return 0.0
-            value = float(parts[0])
-            if len(parts) > 1:
-                unit = parts[1].lower()
-                if "gbps" in unit:
-                    value *= 1e9
-                elif "mbps" in unit:
-                    value *= 1e6
-                elif "kbps" in unit:
-                    value *= 1e3
-            return value
-        except Exception as e:
-            logger.warning(f"Failed to parse rate string '{rate_str}': {str(e)}")
-            return 0.0
-
-    def get_port_statistics(self, device_id, port_name):
-        columns = "port_id,ifSpeed,ifName,ifDescr,ifAlias,ifInOctets_rate,ifOutOctets_rate,ifInOctets_peak,ifOutOctets_peak"
-        res = self._request('GET', f"devices/{device_id}/ports", params={'columns': columns})
-        ports = res.get("ports", []) if isinstance(res, dict) else []
-        
-        matched_port = None
-        target_norm = self._normalize_interface_name(port_name)
-        
-        for port in ports:
-            ifName_norm = self._normalize_interface_name(port.get("ifName"))
-            ifDescr_norm = self._normalize_interface_name(port.get("ifDescr"))
-            if target_norm == ifName_norm or target_norm == ifDescr_norm:
-                matched_port = port
-                break
-                
-        if not matched_port:
-            for port in ports:
-                ifAlias_norm = self._normalize_interface_name(port.get("ifAlias"))
-                if target_norm == ifAlias_norm:
-                    matched_port = port
-                    break
-
-        if not matched_port:
-            for port in ports:
-                ifName_norm = self._normalize_interface_name(port.get("ifName"))
-                ifDescr_norm = self._normalize_interface_name(port.get("ifDescr"))
-                
-                if ifName_norm and ifName_norm.startswith(target_norm):
-                    matched_port = port
-                    break
-                if ifDescr_norm and ifDescr_norm.startswith(target_norm):
-                    matched_port = port
-                    break
-                    
-        if not matched_port:
-            logger.warning(f"Port '{port_name}' not found for device '{device_id}' in LibreNMS.")
-            return None
-            
-        # Get rates using case-insensitive check and multiple keys
-        def get_float_val(d, keys):
-            for k in keys:
-                if d.get(k) is not None:
-                    try:
-                        return float(d.get(k))
-                    except (ValueError, TypeError):
-                        pass
-                for dk, dv in d.items():
-                    if dk.lower() == k.lower() and dv is not None:
-                        try:
-                            return float(dv)
-                        except (ValueError, TypeError):
-                            pass
-            return 0.0
-
-        in_octets_rate = get_float_val(matched_port, ["ifInOctets_rate", "ifinoctets_rate", "in_rate"])
-        out_octets_rate = get_float_val(matched_port, ["ifOutOctets_rate", "ifoutoctets_rate", "out_rate"])
-        in_peak = get_float_val(matched_port, ["ifInOctets_peak", "ifinoctets_peak", "in_peak"])
-        out_peak = get_float_val(matched_port, ["ifOutOctets_peak", "ifoutoctets_peak", "out_peak"])
-        
-        in_bps = in_octets_rate * 8
-        out_bps = out_octets_rate * 8
-        in_peak_bps = in_peak * 8
-        out_peak_bps = out_peak * 8
-        
-        # If rates are very small, try parsing from rate string if present (e.g. "1.85 Gbps" or "19.96 kbps")
-        if in_bps == 0:
-            for k in ["in_rate", "in_rate_str"]:
-                val_str = matched_port.get(k)
-                if val_str:
-                    in_bps = self._parse_rate_str_to_bps(str(val_str))
-                    break
-        if out_bps == 0:
-            for k in ["out_rate", "out_rate_str"]:
-                val_str = matched_port.get(k)
-                if val_str:
-                    out_bps = self._parse_rate_str_to_bps(str(val_str))
-                    break
-
-        return {
-            "in_bps": in_bps,
-            "out_bps": out_bps,
-            "in_peak_bps": in_peak_bps,
-            "out_peak_bps": out_peak_bps,
-            "port_id": matched_port.get("port_id"),
-            "ifSpeed": matched_port.get("ifSpeed")
-        }
 
     def get_port_graph_image(self, device_id, port_name, time_range, double_encode=False, width=1100, height=300):
         range_map = {
@@ -515,25 +412,7 @@ class LibreNMSClient:
             logger.error(f"Failed to delete LibreNMS device {device_id_or_ip}: {str(e)}")
             return None
 
-    def get_device_eventlog(self, device_id_or_name):
-        """
-        Retrieves the event log for a device.
-        """
-        try:
-            res = self._request('GET', f"devices/{device_id_or_name}/eventlog", ignore_circuit_breaker=True)
-            if isinstance(res, dict) and res.get('status') == 'ok':
-                return res.get('logs') or res.get('eventlog') or []
-        except Exception as e:
-            logger.error(f"Failed to retrieve LibreNMS eventlog for device {device_id_or_name}: {str(e)}")
-        
-        # Fallback to global eventlog query parameter
-        try:
-            res = self._request('GET', 'eventlog', params={'device_id': device_id_or_name}, ignore_circuit_breaker=True)
-            if isinstance(res, dict) and res.get('status') == 'ok':
-                return res.get('logs') or res.get('eventlog') or []
-        except Exception:
-            pass
-        return []
+
 
 
 
