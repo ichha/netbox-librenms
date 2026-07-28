@@ -20,33 +20,6 @@
         justify-content: space-between;
         align-items: center;
     }
-    .librenms-status-pulse {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 6px;
-    }
-    .status-up {
-        background-color: #2ed573;
-        box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7);
-        animation: pulse-green 2s infinite;
-    }
-    .status-down {
-        background-color: #ff4757;
-        box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7);
-        animation: pulse-red 2s infinite;
-    }
-    @keyframes pulse-green {
-        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); }
-        70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(46, 213, 115, 0); }
-        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0); }
-    }
-    @keyframes pulse-red {
-        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
-        70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(255, 71, 87, 0); }
-        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
-    }
     .graph-container {
         padding: 12px;
         text-align: center;
@@ -93,32 +66,12 @@
         margin-top: 8px;
         border: 1px solid rgba(0, 0, 0, 0.05);
     }
-    .uptime-stats-panel {
-        text-align: left;
-        background: #fff;
-        border-radius: 8px;
-        padding: 12px;
-        margin-top: 12px;
-        border: 1px solid #eee;
-    }
-    .uptime-stats-title {
-        font-weight: 600;
-        font-size: 0.85rem;
-        color: #333;
-        text-transform: uppercase;
-        border-bottom: 2px solid #eee;
-        padding-bottom: 6px;
-        margin-bottom: 8px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
 </style>
 
 <div class="card librenms-graph-card librenms-traffic-card" id="librenms-traffic-card">
     <div class="librenms-graph-card-header">
         <div class="d-flex align-items-center">
-            <span class="librenms-status-pulse status-up" id="librenms-status-indicator"></span>
+            <span class="librenms-status-pulse" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background-color: #2ed573;"></span>
             <span>LibreNMS Interface Traffic</span>
         </div>
         <div class="graph-controls">
@@ -128,6 +81,14 @@
             <button class="graph-btn" data-range="30d">30d</button>
             <button class="graph-btn" data-range="1y">1y</button>
             <button class="graph-btn" id="btn-custom-range" data-range="custom"><i class="mdi mdi-calendar-clock"></i> Custom</button>
+            
+            <span class="ms-2 me-1 text-white-50 fw-semibold" style="font-size: 0.7rem;">Y-Max:</span>
+            <input type="number" id="graph-y-max" step="any" style="width: 45px; height: 20px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 4px; padding: 0 4px; font-size: 0.7rem; text-align: center; font-weight: bold;" placeholder="Auto" />
+            <select id="graph-y-unit" style="height: 20px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 4px; padding: 0 2px; font-size: 0.7rem; font-weight: bold; cursor: pointer; line-height: 1;">
+                <option value="G">G</option>
+                <option value="M">M</option>
+                <option value="K">K</option>
+            </select>
         </div>
     </div>
     
@@ -176,34 +137,6 @@
             <!-- Hover Tooltip -->
             <div id="graph-hover-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 0.725rem; font-family: monospace; border: 1px solid #22a6b3; box-shadow: 0 4px 15px rgba(0,0,0,0.3); pointer-events: none; z-index: 20; text-align: left; line-height: 1.4; min-width: 180px;"></div>
         </div>
-
-        <!-- Uptime / Downtime Stats Log Panel -->
-        <div id="librenms-uptime-panel" class="uptime-stats-panel d-none">
-            <div class="uptime-stats-title">
-                <span><i class="mdi mdi-clock-check-outline text-success"></i> Downtime & Uptime Status</span>
-                <span id="device-uptime-badge" class="badge bg-secondary text-white">Device Uptime: Loading...</span>
-            </div>
-
-            <!-- Current Downtime Alert (if down) -->
-            <div id="current-downtime-alert" class="alert alert-danger py-2 px-3 mb-2 d-none" role="alert">
-                <i class="mdi mdi-alert-circle"></i> <strong>Current Status: Down</strong> since <span id="current-down-since"></span> (Duration: <span id="current-down-duration"></span>)
-            </div>
-
-            <div id="uptime-log-container">
-                <table class="table table-sm table-hover align-middle mb-0 fs-7">
-                    <thead>
-                        <tr class="table-light">
-                            <th>Link Lost (Down)</th>
-                            <th>Link Recovered (Up)</th>
-                            <th class="text-end">Downtime Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody id="uptime-log-body">
-                        <!-- Filled by JS -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -233,15 +166,8 @@
         const customStartInput = document.getElementById('custom-start-time');
         const customEndInput = document.getElementById('custom-end-time');
         const btnApplyCustom = document.getElementById('btn-apply-custom-range');
-        const statusIndicator = document.getElementById('librenms-status-indicator');
-
-        // Uptime elements
-        const uptimePanel = document.getElementById('librenms-uptime-panel');
-        const deviceUptimeBadge = document.getElementById('device-uptime-badge');
-        const currentDownAlert = document.getElementById('current-downtime-alert');
-        const currentDownSince = document.getElementById('current-down-since');
-        const currentDownDuration = document.getElementById('current-down-duration');
-        const uptimeLogBody = document.getElementById('uptime-log-body');
+        const yMaxInput = document.getElementById('graph-y-max');
+        const yUnitSelect = document.getElementById('graph-y-unit');
 
         // Hover elements
         const hoverLineX = document.getElementById('graph-hover-line-x');
@@ -249,11 +175,23 @@
         const hoverTooltip = document.getElementById('graph-hover-tooltip');
 
         const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
-        const statsUrl = "{% url 'plugins:netbox_librenms:interface_librenms-uptime-status' pk=object.pk %}";
 
         let currentRange = "24h";
-        let downtimeData = [];
-        let currentDowntimeData = null;
+
+        // Pre-fill default Y-Max based on physical port speed from NetBox context
+        // NetBox stores interface speed in kbps (e.g. 10000000 kbps = 10 Gbps)
+        const speedKbps = parseInt("{{ object.speed|default:0 }}");
+        if (speedKbps >= 1000000) {
+            yMaxInput.value = (speedKbps / 1000000).toFixed(0);
+            yUnitSelect.value = "G";
+        } else if (speedKbps > 0) {
+            yMaxInput.value = (speedKbps / 1000).toFixed(0);
+            yUnitSelect.value = "M";
+        } else {
+            // Default fallback if no speed defined
+            yMaxInput.value = "2.0";
+            yUnitSelect.value = "G";
+        }
 
         // Set default custom dates (start = 24h ago, end = now)
         const now = new Date();
@@ -280,61 +218,6 @@
             }
             src += "&_ts=" + new Date().getTime();
             imgEl.src = src;
-        }
-
-        async function fetchUptimeStats() {
-            try {
-                const res = await fetch(statsUrl);
-                if (res.ok) {
-                    const data = await res.json();
-                    downtimeData = data.downtimes || [];
-                    currentDowntimeData = data.current_downtime || null;
-                    
-                    // Update system status pulse
-                    if (data.device_status === "Up") {
-                        statusIndicator.className = "librenms-status-pulse status-up";
-                    } else {
-                        statusIndicator.className = "librenms-status-pulse status-down";
-                    }
-
-                    deviceUptimeBadge.textContent = "Device Uptime: " + data.device_uptime;
-                    
-                    // Current downtime
-                    if (data.current_downtime) {
-                        currentDownAlert.classList.remove('d-none');
-                        currentDownSince.textContent = data.current_downtime.down_since;
-                        currentDownDuration.textContent = data.current_downtime.duration;
-                    } else {
-                        currentDownAlert.classList.add('d-none');
-                    }
-
-                    // Historical Downtimes table
-                    uptimeLogBody.innerHTML = '';
-                    if (downtimeData.length > 0) {
-                        downtimeData.forEach(row => {
-                            const tr = document.createElement('tr');
-                            tr.innerHTML = `
-                                <td class="text-danger fw-semibold"><i class="mdi mdi-close-network"></i> ${row.down_time}</td>
-                                <td class="text-success fw-semibold"><i class="mdi mdi-check-network"></i> ${row.up_time}</td>
-                                <td class="text-end fw-bold text-dark">${row.duration}</td>
-                            `;
-                            uptimeLogBody.appendChild(tr);
-                        });
-                    } else {
-                        uptimeLogBody.innerHTML = `
-                            <tr>
-                                <td colspan="3" class="text-center text-muted py-3">
-                                    <i class="mdi mdi-shield-check-outline text-success fs-4 d-block mb-1"></i>
-                                    No downtime events recorded in LibreNMS logs for this port.
-                                </td>
-                            </tr>
-                        `;
-                    }
-                    uptimePanel.classList.remove('d-none');
-                }
-            } catch (e) {
-                console.error("Failed to load uptime statistics:", e);
-            }
         }
 
         if (imgEl) {
@@ -442,27 +325,16 @@
                 };
                 const formattedTime = hoverDate.toLocaleDateString('en-US', dateOpts);
                 
-                // Cross-reference with downtime ranges
-                let statusLabel = '<span style="color: #2ed573; font-weight: bold;">✓ Active (Traffic Flowing)</span>';
+                // Calculate actual usage rate from user's custom scale setting
+                const yMax = parseFloat(yMaxInput.value) || 2.0;
+                const yUnit = yUnitSelect.value;
+                const usageVal = relY * yMax;
                 
-                if (downtimeData.length > 0) {
-                    for (let i = 0; i < downtimeData.length; i++) {
-                        const dt = downtimeData[i];
-                        const tDown = new Date(dt.down_time).getTime();
-                        const tUp = new Date(dt.up_time).getTime();
-                        if (hoverTimeMs >= tDown && hoverTimeMs <= tUp) {
-                            statusLabel = '<span style="color: #ff4757; font-weight: bold;">⚠️ LINK DOWN (Downtime Period)</span>';
-                            break;
-                        }
-                    }
-                }
-                
-                if (currentDowntimeData) {
-                    const tDown = new Date(currentDowntimeData.down_since).getTime();
-                    if (hoverTimeMs >= tDown) {
-                        statusLabel = '<span style="color: #ff4757; font-weight: bold;">⚠️ LINK DOWN (Downtime Period)</span>';
-                    }
-                }
+                // format suffix: Gbps, Mbps, Kbps
+                let suffix = "bps";
+                if (yUnit === "G") suffix = "Gbps";
+                else if (yUnit === "M") suffix = "Mbps";
+                else if (yUnit === "K") suffix = "Kbps";
                 
                 // Update guides position
                 hoverLineX.style.left = `${mouseX}px`;
@@ -477,8 +349,7 @@
                         <i class="mdi mdi-chart-line"></i> Interface Stats
                     </div>
                     <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
-                    <div style="margin-bottom: 4px;"><strong>Usage Level:</strong> ${(relY * 100).toFixed(0)}% of max</div>
-                    <div><strong>Status:</strong> ${statusLabel}</div>
+                    <div><strong>Usage:</strong> ${usageVal.toFixed(2)} ${suffix}</div>
                 `;
                 
                 let tooltipLeft = mouseX + 15;
@@ -508,8 +379,7 @@
             hoverTooltip.style.display = 'none';
         }
 
-        // Initial loads
+        // Initial load
         loadGraph("24h");
-        fetchUptimeStats();
     })();
 </script>
