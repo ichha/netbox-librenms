@@ -78,49 +78,18 @@ class LibreNMSClient:
 
         dev = None
         try:
-            # First try direct retrieval
-            res = self._request('GET', f"devices/{ip_or_name}")
+            # Direct retrieval only
+            res = self._request('GET', f"devices/{ip_or_name}", ignore_circuit_breaker=True)
             if res.get('status') == 'ok' and res.get('devices'):
                 dev = res['devices'][0]
         except Exception:
             pass
-        
-        if not dev:
-            # If that fails, search the global devices list
-            try:
-                # Cache the list of all devices for 60 seconds to avoid repeating heavy load
-                devices_list_key = "librenms_all_devices_list"
-                all_devices = cache.get(devices_list_key)
-                if all_devices is None:
-                    res = self._request('GET', 'devices')
-                    if res.get('status') == 'ok' and res.get('devices'):
-                        all_devices = res['devices']
-                        cache.set(devices_list_key, all_devices, 60)
-                    else:
-                        all_devices = []
-
-                if all_devices:
-                    target_lower = str(ip_or_name).lower().strip()
-                    for d in all_devices:
-                        hostname = str(d.get('hostname') or '').lower().strip()
-                        sysname = str(d.get('sysName') or '').lower().strip()
-                        display = str(d.get('display') or '').lower().strip()
-                        ip = str(d.get('ip') or '').lower().strip()
-                        
-                        if (target_lower == hostname or 
-                            target_lower == sysname or 
-                            target_lower == display or 
-                            target_lower == ip):
-                            dev = d
-                            break
-            except Exception:
-                pass
             
         if dev:
-            cache.set(cache_key, dev, 300) # Cache hit for 5 minutes
+            cache.set(cache_key, dev, 1800) # Cache hit for 30 minutes
             return dev
         else:
-            cache.set(cache_key, "NOT_FOUND", 60) # Cache miss for 1 minute
+            cache.set(cache_key, "NOT_FOUND", 1800) # Cache miss for 30 minutes
             return None
 
     def get_device_ports(self, hostname_or_id):
