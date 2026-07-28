@@ -165,9 +165,16 @@
             <p id="librenms-error-msg" class="mb-0">Failed to load LibreNMS graph.</p>
         </div>
 
-        <!-- Graph Image Wrapper -->
-        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none">
-            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto;" />
+        <!-- Graph Image Wrapper with Interactive Hover Elements -->
+        <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none position-relative" style="user-select: none; cursor: crosshair;">
+            <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto; display: block;" />
+            
+            <!-- Hover Guides -->
+            <div id="graph-hover-line-x" style="position: absolute; top: 0; bottom: 0; width: 1px; border-left: 1px dashed #22a6b3; display: none; pointer-events: none; z-index: 10;"></div>
+            <div id="graph-hover-line-y" style="position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #22a6b3; display: none; pointer-events: none; z-index: 10;"></div>
+            
+            <!-- Hover Tooltip -->
+            <div id="graph-hover-tooltip" style="position: absolute; display: none; background: rgba(15, 23, 42, 0.95); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 0.725rem; font-family: monospace; border: 1px solid #22a6b3; box-shadow: 0 4px 15px rgba(0,0,0,0.3); pointer-events: none; z-index: 20; text-align: left; line-height: 1.4; min-width: 180px;"></div>
         </div>
 
         <!-- Uptime / Downtime Stats Log Panel -->
@@ -236,8 +243,17 @@
         const currentDownDuration = document.getElementById('current-down-duration');
         const uptimeLogBody = document.getElementById('uptime-log-body');
 
+        // Hover elements
+        const hoverLineX = document.getElementById('graph-hover-line-x');
+        const hoverLineY = document.getElementById('graph-hover-line-y');
+        const hoverTooltip = document.getElementById('graph-hover-tooltip');
+
         const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
         const statsUrl = "{% url 'plugins:netbox_librenms:interface_librenms-uptime-status' pk=object.pk %}";
+
+        let currentRange = "24h";
+        let downtimeData = [];
+        let currentDowntimeData = null;
 
         // Set default custom dates (start = 24h ago, end = now)
         const now = new Date();
@@ -253,6 +269,7 @@
 
         function loadGraph(range, customParams = '') {
             if (!imgEl) return;
+            currentRange = range;
             loadingEl.classList.remove('d-none');
             errorEl.classList.add('d-none');
             wrapperEl.classList.add('d-none');
@@ -270,6 +287,8 @@
                 const res = await fetch(statsUrl);
                 if (res.ok) {
                     const data = await res.json();
+                    downtimeData = data.downtimes || [];
+                    currentDowntimeData = data.current_downtime || null;
                     
                     // Update system status pulse
                     if (data.device_status === "Up") {
@@ -291,8 +310,8 @@
 
                     // Historical Downtimes table
                     uptimeLogBody.innerHTML = '';
-                    if (data.downtimes && data.downtimes.length > 0) {
-                        data.downtimes.forEach(row => {
+                    if (downtimeData.length > 0) {
+                        downtimeData.forEach(row => {
                             const tr = document.createElement('tr');
                             tr.innerHTML = `
                                 <td class="text-danger fw-semibold"><i class="mdi mdi-close-network"></i> ${row.down_time}</td>
@@ -364,13 +383,130 @@
             const endVal = customEndInput.value;
             if (!startVal) return;
             
-            // Format start and end times to Unix timestamps or LibreNMS standard format
-            // e.g. YYYY-MM-DD HH:MM
             const formatTime = (isoStr) => isoStr.replace('T', ' ');
-            
             const params = `&from=${encodeURIComponent(formatTime(startVal))}` + (endVal ? `&to=${encodeURIComponent(formatTime(endVal))}` : '');
             loadGraph('custom', params);
         });
+
+        // Graph Interactive Mouse Hover Logic
+        wrapperEl.addEventListener('mousemove', function(e) {
+            if (!imgEl || loadingEl.classList.contains('d-none') === false) return;
+            
+            const rect = imgEl.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            const pctX = mouseX / rect.width;
+            const pctY = mouseY / rect.height;
+            
+            // Plot Area boundary boundaries for standard LibreNMS graphs
+            const plotXStart = 0.093;
+            const plotXEnd = 0.955;
+            const plotYStart = 0.08;
+            const plotYEnd = 0.765;
+            
+            if (pctX >= plotXStart && pctX <= plotXEnd && pctY >= plotYStart && pctY <= plotYEnd) {
+                // Calculate position relative to the inner plot area (0 to 1)
+                const relX = (pctX - plotXStart) / (plotXEnd - plotXStart);
+                const relY = (plotYEnd - pctY) / (plotYEnd - plotYStart); // 0 at bottom, 1 at top
+                
+                // Calculate timestamp
+                let endTime = new Date();
+                let startTime = new Date(endTime.getTime() - (24 * 60 * 60 * 1000));
+                
+                if (currentRange === '48h') {
+                    startTime = new Date(endTime.getTime() - (48 * 60 * 60 * 1000));
+                } else if (currentRange === '7d') {
+                    startTime = new Date(endTime.getTime() - (7 * 24 * 60 * 60 * 1000));
+                } else if (currentRange === '30d') {
+                    startTime = new Date(endTime.getTime() - (30 * 24 * 60 * 60 * 1000));
+                } else if (currentRange === '1y') {
+                    startTime = new Date(endTime.getTime() - (365 * 24 * 60 * 60 * 1000));
+                } else if (currentRange === 'custom') {
+                    startTime = new Date(customStartInput.value);
+                    endTime = customEndInput.value ? new Date(customEndInput.value) : new Date();
+                }
+                
+                const hoverTimeMs = startTime.getTime() + relX * (endTime.getTime() - startTime.getTime());
+                const hoverDate = new Date(hoverTimeMs);
+                
+                // Format hover Date and Time
+                const dateOpts = { 
+                    weekday: 'short', 
+                    month: 'short', 
+                    day: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true 
+                };
+                const formattedTime = hoverDate.toLocaleDateString('en-US', dateOpts);
+                
+                // Cross-reference with downtime ranges
+                let statusLabel = '<span style="color: #2ed573; font-weight: bold;">✓ Active (Traffic Flowing)</span>';
+                
+                if (downtimeData.length > 0) {
+                    for (let i = 0; i < downtimeData.length; i++) {
+                        const dt = downtimeData[i];
+                        const tDown = new Date(dt.down_time).getTime();
+                        const tUp = new Date(dt.up_time).getTime();
+                        if (hoverTimeMs >= tDown && hoverTimeMs <= tUp) {
+                            statusLabel = '<span style="color: #ff4757; font-weight: bold;">⚠️ LINK DOWN (Downtime Period)</span>';
+                            break;
+                        }
+                    }
+                }
+                
+                if (currentDowntimeData) {
+                    const tDown = new Date(currentDowntimeData.down_since).getTime();
+                    if (hoverTimeMs >= tDown) {
+                        statusLabel = '<span style="color: #ff4757; font-weight: bold;">⚠️ LINK DOWN (Downtime Period)</span>';
+                    }
+                }
+                
+                // Update guides position
+                hoverLineX.style.left = `${mouseX}px`;
+                hoverLineX.style.display = 'block';
+                
+                hoverLineY.style.top = `${mouseY}px`;
+                hoverLineY.style.display = 'block';
+                
+                // Position and populate Tooltip
+                hoverTooltip.innerHTML = `
+                    <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #22a6b3;">
+                        <i class="mdi mdi-chart-line"></i> Interface Stats
+                    </div>
+                    <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
+                    <div style="margin-bottom: 4px;"><strong>Usage Level:</strong> ${(relY * 100).toFixed(0)}% of max</div>
+                    <div><strong>Status:</strong> ${statusLabel}</div>
+                `;
+                
+                let tooltipLeft = mouseX + 15;
+                if (tooltipLeft + 190 > rect.width) {
+                    tooltipLeft = mouseX - 190 - 15;
+                }
+                hoverTooltip.style.left = `${tooltipLeft}px`;
+                
+                let tooltipTop = mouseY + 15;
+                if (tooltipTop + 100 > rect.height) {
+                    tooltipTop = rect.height - 100;
+                }
+                hoverTooltip.style.top = `${tooltipTop}px`;
+                hoverTooltip.style.display = 'block';
+            } else {
+                hideHoverGuides();
+            }
+        });
+        
+        wrapperEl.addEventListener('mouseleave', function() {
+            hideHoverGuides();
+        });
+        
+        function hideHoverGuides() {
+            hoverLineX.style.display = 'none';
+            hoverLineY.style.display = 'none';
+            hoverTooltip.style.display = 'none';
+        }
 
         // Initial loads
         loadGraph("24h");
