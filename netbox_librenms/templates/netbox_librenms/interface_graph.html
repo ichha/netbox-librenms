@@ -397,71 +397,24 @@
                 hoverLineX.style.left = `${mouseX}px`;
                 hoverLineX.style.display = 'block';
                 
-                hoverLineY.style.top = `${mouseY}px`;
-                hoverLineY.style.display = 'block';
+                hoverLineY.style.display = 'none'; // Hide horizontal line as we only show Time
                 
-                // Helper to format bps rate dynamically
-                function formatBps(bps) {
-                    if (bps === undefined || bps === null || isNaN(bps)) return "0.00 bps";
-                    if (bps >= 1e9) {
-                        return (bps / 1e9).toFixed(2) + " Gbps";
-                    } else if (bps >= 1e6) {
-                        return (bps / 1e6).toFixed(2) + " Mbps";
-                    } else if (bps >= 1e3) {
-                        return (bps / 1e3).toFixed(2) + " Kbps";
-                    } else {
-                        return bps.toFixed(2) + " bps";
-                    }
-                }
-
-                // Position and populate Tooltip
-                let tooltipHtml = '';
-                if (isOffline) {
-                    // LINK DOWN - Display 0.00 traffic
-                    tooltipHtml = `
-                        <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #ff4757;">
-                            <i class="mdi mdi-close-network"></i> Link Offline (Downtime)
-                        </div>
-                        <div style="margin-bottom: 4px;"><strong>Time:</strong> ${formattedTime}</div>
-                        <div style="margin-bottom: 4px; color: #2ed573;"><strong>Inbound:</strong> 0.00 bps</div>
-                        <div style="color: #a55eea;"><strong>Outbound:</strong> 0.00 bps</div>
-                    `;
-                } else {
-                    // LINK ACTIVE - Show Cursor Level, and actual current/peak rates
-                    const usageBps = relY * yMaxVal * scaleDivider;
-
-                    tooltipHtml = `
-                        <div style="border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 4px; margin-bottom: 6px; font-weight: bold; color: #22a6b3;">
-                            <i class="mdi mdi-chart-line"></i> Aligned Traffic Stats
-                        </div>
-                        <div style="margin-bottom: 6px;"><strong>Time:</strong> ${formattedTime}</div>
-                        
-                        <div style="border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px; margin-bottom: 4px;">
-                            <strong>Cursor Level:</strong> <span style="font-weight: bold; color: #00d2d3;">${formatBps(usageBps)}</span>
-                        </div>
-                        
-                        <div style="font-size: 0.675rem; margin-bottom: 2px;">
-                            <span style="color: #2ed573; font-weight: bold;">● In Now:</span> ${formatBps(currentInBps)}
-                            <span style="color: #2ed573; opacity: 0.7;">(Max: ${formatBps(inPeakBps)})</span>
-                        </div>
-                        <div style="font-size: 0.675rem;">
-                            <span style="color: #a55eea; font-weight: bold;">● Out Now:</span> ${formatBps(currentOutBps)}
-                            <span style="color: #a55eea; opacity: 0.7;">(Max: ${formatBps(outPeakBps)})</span>
-                        </div>
-                    `;
-                }
-                
-                hoverTooltip.innerHTML = tooltipHtml;
+                // Position and populate Tooltip with only the Time
+                hoverTooltip.innerHTML = `
+                    <div style="font-weight: bold; color: #22a6b3; font-size: 0.725rem; white-space: nowrap;">
+                        <i class="mdi mdi-clock-outline"></i> ${formattedTime}
+                    </div>
+                `;
                 
                 let tooltipLeft = mouseX + 15;
-                if (tooltipLeft + 230 > rect.width) {
-                    tooltipLeft = mouseX - 230 - 15;
+                if (tooltipLeft + 160 > rect.width) {
+                    tooltipLeft = mouseX - 160 - 15;
                 }
                 hoverTooltip.style.left = `${tooltipLeft}px`;
                 
                 let tooltipTop = mouseY + 15;
-                if (tooltipTop + 130 > rect.height) {
-                    tooltipTop = rect.height - 130;
+                if (tooltipTop + 45 > rect.height) {
+                    tooltipTop = rect.height - 45;
                 }
                 hoverTooltip.style.top = `${tooltipTop}px`;
                 hoverTooltip.style.display = 'block';
