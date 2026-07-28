@@ -241,8 +241,11 @@
                 const x = e.clientX - rect.left;
                 const relX = x / rect.width;
                 
-                // RRDTool graph area is roughly between X = 14% and X = 95.5%
-                if (relX >= 0.14 && relX <= 0.955) {
+                // RRDTool graph area is precisely between X = 10.8% and X = 97.5%
+                const graphStart = 0.108;
+                const graphEnd = 0.975;
+                
+                if (relX >= graphStart && relX <= graphEnd) {
                     const lineX = x + imgEl.offsetLeft;
                     
                     crosshairLine.style.left = lineX + 'px';
@@ -250,7 +253,7 @@
                     crosshairLine.style.height = imgEl.offsetHeight + 'px';
                     crosshairLine.style.display = 'block';
 
-                    const t_ratio = (relX - 0.14) / (0.955 - 0.14);
+                    const t_ratio = (relX - graphStart) / (graphEnd - graphStart);
                     const timeStr = calculateTimeAt(t_ratio);
 
                     crosshairTooltip.style.left = (lineX + 12) + 'px';
@@ -303,20 +306,20 @@
             const hours = String(hoveredTime.getHours()).padStart(2, '0');
             const minutes = String(hoveredTime.getMinutes()).padStart(2, '0');
             
+            const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            
+            const dayName = dayNames[hoveredTime.getDay()];
+            const monthName = monthNames[hoveredTime.getMonth()];
+            const day = hoveredTime.getDate();
+            
             if (duration <= 48 * 60 * 60 * 1000) {
-                const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-                const dayName = dayNames[hoveredTime.getDay()];
-                return `${dayName} ${hours}:${minutes}`;
+                return `${dayName}, ${monthName} ${day} — ${hours}:${minutes}`;
             } else if (duration <= 30 * 24 * 60 * 60 * 1000) {
-                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                const monthName = monthNames[hoveredTime.getMonth()];
-                const day = hoveredTime.getDate();
-                return `${monthName} ${day} ${hours}:${minutes}`;
+                return `${dayName}, ${monthName} ${day} — ${hours}:${minutes}`;
             } else {
                 const year = hoveredTime.getFullYear();
-                const month = String(hoveredTime.getMonth() + 1).padStart(2, '0');
-                const day = String(hoveredTime.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day} ${hours}:${minutes}`;
+                return `${year}-${String(hoveredTime.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')} — ${hours}:${minutes}`;
             }
         }
 
