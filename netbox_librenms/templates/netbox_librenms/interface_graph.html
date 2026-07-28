@@ -32,10 +32,20 @@
         box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7);
         animation: pulse-green 2s infinite;
     }
+    .status-down {
+        background-color: #ff4757;
+        box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7);
+        animation: pulse-red 2s infinite;
+    }
     @keyframes pulse-green {
         0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0.7); }
         70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(46, 213, 115, 0); }
         100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(46, 213, 115, 0); }
+    }
+    @keyframes pulse-red {
+        0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+        70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(255, 71, 87, 0); }
+        100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
     }
     .graph-container {
         padding: 12px;
@@ -48,6 +58,7 @@
         flex-wrap: wrap;
         gap: 4px;
         justify-content: center;
+        align-items: center;
     }
     .graph-btn {
         background-color: rgba(255, 255, 255, 0.15);
@@ -75,12 +86,39 @@
         border: 1px solid #eee;
         padding: 8px;
     }
+    .custom-range-panel {
+        background: rgba(0, 0, 0, 0.03);
+        border-radius: 8px;
+        padding: 10px;
+        margin-top: 8px;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+    .uptime-stats-panel {
+        text-align: left;
+        background: #fff;
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 12px;
+        border: 1px solid #eee;
+    }
+    .uptime-stats-title {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #333;
+        text-transform: uppercase;
+        border-bottom: 2px solid #eee;
+        padding-bottom: 6px;
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
 </style>
 
 <div class="card librenms-graph-card librenms-traffic-card" id="librenms-traffic-card">
     <div class="librenms-graph-card-header">
         <div class="d-flex align-items-center">
-            <span class="librenms-status-pulse status-up"></span>
+            <span class="librenms-status-pulse status-up" id="librenms-status-indicator"></span>
             <span>LibreNMS Interface Traffic</span>
         </div>
         <div class="graph-controls">
@@ -89,10 +127,28 @@
             <button class="graph-btn" data-range="7d">7d</button>
             <button class="graph-btn" data-range="30d">30d</button>
             <button class="graph-btn" data-range="1y">1y</button>
+            <button class="graph-btn" id="btn-custom-range" data-range="custom"><i class="mdi mdi-calendar-clock"></i> Custom</button>
         </div>
     </div>
     
     <div class="graph-container">
+        <!-- Custom Range Date Time Pickers -->
+        <div id="custom-range-panel" class="custom-range-panel d-none text-start">
+            <div class="row g-2 align-items-end">
+                <div class="col-sm-5">
+                    <label class="form-label fs-7 text-muted fw-bold">Start Date & Time</label>
+                    <input type="datetime-local" id="custom-start-time" class="form-control form-control-sm" />
+                </div>
+                <div class="col-sm-5">
+                    <label class="form-label fs-7 text-muted fw-bold">End Date & Time</label>
+                    <input type="datetime-local" id="custom-end-time" class="form-control form-control-sm" />
+                </div>
+                <div class="col-sm-2 d-grid">
+                    <button type="button" id="btn-apply-custom-range" class="btn btn-sm btn-primary fw-bold text-white">Apply</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Loading Spinner -->
         <div id="librenms-loading" class="d-flex flex-column justify-content-center align-items-center py-5">
             <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;">
@@ -113,12 +169,39 @@
         <div id="librenms-graph-wrapper" class="graph-img-wrapper d-none">
             <img id="librenms-interface-graph-img" src="" alt="Interface Traffic Graph" class="img-fluid" style="width: 100%; height: auto;" />
         </div>
+
+        <!-- Uptime / Downtime Stats Log Panel -->
+        <div id="librenms-uptime-panel" class="uptime-stats-panel d-none">
+            <div class="uptime-stats-title">
+                <span><i class="mdi mdi-clock-check-outline text-success"></i> Downtime & Uptime Status</span>
+                <span id="device-uptime-badge" class="badge bg-secondary text-white">Device Uptime: Loading...</span>
+            </div>
+
+            <!-- Current Downtime Alert (if down) -->
+            <div id="current-downtime-alert" class="alert alert-danger py-2 px-3 mb-2 d-none" role="alert">
+                <i class="mdi mdi-alert-circle"></i> <strong>Current Status: Down</strong> since <span id="current-down-since"></span> (Duration: <span id="current-down-duration"></span>)
+            </div>
+
+            <div id="uptime-log-container">
+                <table class="table table-sm table-hover align-middle mb-0 fs-7">
+                    <thead>
+                        <tr class="table-light">
+                            <th>Link Lost (Down)</th>
+                            <th>Link Recovered (Up)</th>
+                            <th class="text-end">Downtime Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="uptime-log-body">
+                        <!-- Filled by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
     (function() {
-        // De-duplicate the card if NetBox renders it on multiple injection hooks
         const cards = document.querySelectorAll('.librenms-traffic-card');
         if (cards.length > 1) {
             for (let i = 1; i < cards.length; i++) {
@@ -127,7 +210,6 @@
         }
         const cardEl = document.getElementById("librenms-traffic-card");
         if (cardEl) {
-            // Find the Bootstrap column container (the right column) and move the card to the top
             const column = cardEl.closest('.col') || cardEl.closest('[class*="col-"]') || cardEl.parentElement;
             if (column) {
                 column.insertBefore(cardEl, column.firstChild);
@@ -140,18 +222,100 @@
         const errorMsgEl = document.getElementById('librenms-error-msg');
         const wrapperEl = document.getElementById('librenms-graph-wrapper');
         const rangeButtons = document.querySelectorAll('.graph-btn');
+        const customRangePanel = document.getElementById('custom-range-panel');
+        const customStartInput = document.getElementById('custom-start-time');
+        const customEndInput = document.getElementById('custom-end-time');
+        const btnApplyCustom = document.getElementById('btn-apply-custom-range');
+        const statusIndicator = document.getElementById('librenms-status-indicator');
+
+        // Uptime elements
+        const uptimePanel = document.getElementById('librenms-uptime-panel');
+        const deviceUptimeBadge = document.getElementById('device-uptime-badge');
+        const currentDownAlert = document.getElementById('current-downtime-alert');
+        const currentDownSince = document.getElementById('current-down-since');
+        const currentDownDuration = document.getElementById('current-down-duration');
+        const uptimeLogBody = document.getElementById('uptime-log-body');
 
         const baseUrl = "{% url 'plugins:netbox_librenms:interface_librenms-graph' pk=object.pk %}";
-        let currentRange = "24h";
+        const statsUrl = "{% url 'plugins:netbox_librenms:interface_librenms-uptime-status' pk=object.pk %}";
 
-        function loadGraph(range) {
+        // Set default custom dates (start = 24h ago, end = now)
+        const now = new Date();
+        const past24h = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+        
+        function formatDateTimeLocal(date) {
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+        
+        customStartInput.value = formatDateTimeLocal(past24h);
+        customEndInput.value = formatDateTimeLocal(now);
+
+        function loadGraph(range, customParams = '') {
             if (!imgEl) return;
             loadingEl.classList.remove('d-none');
             errorEl.classList.add('d-none');
             wrapperEl.classList.add('d-none');
 
-            // Force a cache-busting timestamp
-            imgEl.src = baseUrl + "?range=" + range + "&_ts=" + new Date().getTime();
+            let src = baseUrl + "?range=" + range;
+            if (customParams) {
+                src += customParams;
+            }
+            src += "&_ts=" + new Date().getTime();
+            imgEl.src = src;
+        }
+
+        async function fetchUptimeStats() {
+            try {
+                const res = await fetch(statsUrl);
+                if (res.ok) {
+                    const data = await res.json();
+                    
+                    // Update system status pulse
+                    if (data.device_status === "Up") {
+                        statusIndicator.className = "librenms-status-pulse status-up";
+                    } else {
+                        statusIndicator.className = "librenms-status-pulse status-down";
+                    }
+
+                    deviceUptimeBadge.textContent = "Device Uptime: " + data.device_uptime;
+                    
+                    // Current downtime
+                    if (data.current_downtime) {
+                        currentDownAlert.classList.remove('d-none');
+                        currentDownSince.textContent = data.current_downtime.down_since;
+                        currentDownDuration.textContent = data.current_downtime.duration;
+                    } else {
+                        currentDownAlert.classList.add('d-none');
+                    }
+
+                    // Historical Downtimes table
+                    uptimeLogBody.innerHTML = '';
+                    if (data.downtimes && data.downtimes.length > 0) {
+                        data.downtimes.forEach(row => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td class="text-danger fw-semibold"><i class="mdi mdi-close-network"></i> ${row.down_time}</td>
+                                <td class="text-success fw-semibold"><i class="mdi mdi-check-network"></i> ${row.up_time}</td>
+                                <td class="text-end fw-bold text-dark">${row.duration}</td>
+                            `;
+                            uptimeLogBody.appendChild(tr);
+                        });
+                    } else {
+                        uptimeLogBody.innerHTML = `
+                            <tr>
+                                <td colspan="3" class="text-center text-muted py-3">
+                                    <i class="mdi mdi-shield-check-outline text-success fs-4 d-block mb-1"></i>
+                                    No downtime events recorded in LibreNMS logs for this port.
+                                </td>
+                            </tr>
+                        `;
+                    }
+                    uptimePanel.classList.remove('d-none');
+                }
+            } catch (e) {
+                console.error("Failed to load uptime statistics:", e);
+            }
         }
 
         if (imgEl) {
@@ -186,11 +350,30 @@
                 this.classList.add('active');
                 
                 const range = this.getAttribute('data-range');
-                loadGraph(range);
+                if (range === 'custom') {
+                    customRangePanel.classList.remove('d-none');
+                } else {
+                    customRangePanel.classList.add('d-none');
+                    loadGraph(range);
+                }
             });
         });
 
-        // Initial load
-        loadGraph(currentRange);
+        btnApplyCustom.addEventListener('click', function() {
+            const startVal = customStartInput.value;
+            const endVal = customEndInput.value;
+            if (!startVal) return;
+            
+            // Format start and end times to Unix timestamps or LibreNMS standard format
+            // e.g. YYYY-MM-DD HH:MM
+            const formatTime = (isoStr) => isoStr.replace('T', ' ');
+            
+            const params = `&from=${encodeURIComponent(formatTime(startVal))}` + (endVal ? `&to=${encodeURIComponent(formatTime(endVal))}` : '');
+            loadGraph('custom', params);
+        });
+
+        // Initial loads
+        loadGraph("24h");
+        fetchUptimeStats();
     })();
 </script>

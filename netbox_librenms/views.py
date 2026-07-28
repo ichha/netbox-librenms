@@ -1236,16 +1236,16 @@ class InterfaceLibreNMSGraphView(View):
         
         # Translate time range query parameter to 'from' parameter
         time_range = request.GET.get('range', '24h')
+        from_val = request.GET.get('from')
+        to_val = request.GET.get('to')
+        
         range_map = {
             '24h': '-1d',
             '48h': '-2d',
             '7d': '-7d',
             '30d': '-30d',
             '1y': '-1y',
-            '1d': '-1d',
-            '2d': '-2d',
         }
-        from_val = range_map.get(time_range, '-1d')
         
         # Prepare query parameters (dimensions, legend, inverse, and range)
         width = request.GET.get('width') or '550'
@@ -1253,15 +1253,28 @@ class InterfaceLibreNMSGraphView(View):
         legend = request.GET.get('legend', 'yes')
         inverse = request.GET.get('inverse', '0')
         
-        api_params = {
-            'from': from_val,
-            'legend': legend,
-            'width': width,
-            'height': height,
-            'inverse': inverse,
-            'stacked': '1',
-            'graph_stacked': '1',
-        }
+        if time_range == 'custom' and from_val:
+            api_params = {
+                'from': from_val,
+                'legend': legend,
+                'width': width,
+                'height': height,
+                'inverse': inverse,
+                'stacked': '1',
+                'graph_stacked': '1',
+            }
+            if to_val:
+                api_params['to'] = to_val
+        else:
+            api_params = {
+                'from': range_map.get(time_range, '-1d'),
+                'legend': legend,
+                'width': width,
+                'height': height,
+                'inverse': inverse,
+                'stacked': '1',
+                'graph_stacked': '1',
+            }
 
         def validate_and_get_image(endpoint, params):
             """
@@ -1326,6 +1339,155 @@ class InterfaceLibreNMSGraphView(View):
                 err_msg = f"Failed to fetch graph via both single and double encoded routes. Single error: {str(single_err)}. Double error: {str(double_err)}"
                 logger.error(err_msg)
                 return HttpResponse(err_msg, status=500, content_type="text/plain")
+
+
+class InterfaceLibreNMSUptimeStatusView(View):
+    def get(self, request, pk):
+        from django.http import JsonResponse
+        import datetime
+        
+        try:
+            interface = Interface.objects.get(pk=pk)
+        except Interface.DoesNotExist:
+            return JsonResponse({'error': 'Interface not found'}, status=404)
+
+        client = LibreNMSClient()
+        if not client.is_configured():
+            return JsonResponse({'error': 'LibreNMS not configured'}, status=500)
+
+        librenms_device = get_librenms_device(client, interface.device)
+        if not librenms_device:
+            return JsonResponse({'error': 'Device not found in LibreNMS'}, status=404)
+
+        device_id = librenms_device.get('device_id')
+        
+        # System Uptime
+        uptime_sec = librenms_device.get('uptime')
+        formatted_uptime = "Unknown"
+        if uptime_sec:
+            try:
+                seconds = int(uptime_sec)
+                days = seconds // 86400
+                hours = (seconds % 86400) // 3600
+                minutes = (seconds % 3600) // 60
+                if days > 0:
+                    formatted_uptime = f"{days}d {hours}h {minutes}m"
+                else:
+                    formatted_uptime = f"{hours}h {minutes}m"
+            except Exception:
+                formatted_uptime = str(uptime_sec)
+
+        device_status = "Up" if librenms_device.get('status') == 1 or librenms_device.get('status') == '1' else "Down"
+
+        # Fetch event log
+        event_logs = client.get_device_eventlog(device_id)
+        
+        # Resolve target port to match messages
+        ports = client.get_device_ports(device_id)
+        target_port = match_interface_to_port(interface.name, ports)
+        
+        port_names = [interface.name.lower().strip()]
+        if target_port:
+            for k in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
+                v = target_port.get(k)
+                if v:
+                    port_names.append(str(v).lower().strip())
+        
+        # Filter event logs for this interface
+        interface_events = []
+        for log in event_logs:
+            msg = str(log.get('message') or '').lower()
+            matched_port = False
+            for p_name in port_names:
+                if p_name in msg:
+                    matched_port = True
+                    break
+            
+            if target_port and str(target_port.get('port_id')) in msg:
+                matched_port = True
+                
+            if not matched_port:
+                continue
+
+            # Parse event type
+            is_down = "down" in msg or "operstatus: up -> down" in msg
+            is_up = "up" in msg or "operstatus: down -> up" in msg
+            
+            if is_down or is_up:
+                interface_events.append({
+                    'datetime': log.get('datetime'),
+                    'message': log.get('message'),
+                    'type': 'down' if is_down else 'up',
+                    'timestamp': log.get('datetime')
+                })
+
+        # Sort events chronologically (oldest first) to calculate durations easily
+        interface_events.sort(key=lambda x: x['timestamp'])
+
+        downtime_periods = []
+        last_down = None
+
+        for ev in interface_events:
+            if ev['type'] == 'down':
+                last_down = ev
+            elif ev['type'] == 'up' and last_down:
+                try:
+                    t_down = datetime.datetime.strptime(last_down['timestamp'], '%Y-%m-%d %H:%M:%S')
+                    t_up = datetime.datetime.strptime(ev['timestamp'], '%Y-%m-%d %H:%M:%S')
+                    duration = t_up - t_down
+                    
+                    # format duration
+                    tot_sec = int(duration.total_seconds())
+                    d_hours = tot_sec // 3600
+                    d_mins = (tot_sec % 3600) // 60
+                    d_secs = tot_sec % 60
+                    duration_str = f"{d_hours}h {d_mins}m {d_secs}s" if d_hours > 0 else f"{d_mins}m {d_secs}s"
+
+                    downtime_periods.append({
+                        'down_time': last_down['timestamp'],
+                        'up_time': ev['timestamp'],
+                        'duration': duration_str,
+                        'duration_seconds': tot_sec
+                    })
+                except Exception:
+                    downtime_periods.append({
+                        'down_time': last_down['timestamp'],
+                        'up_time': ev['timestamp'],
+                        'duration': 'Unknown',
+                        'duration_seconds': 0
+                    })
+                last_down = None
+
+        # If it is currently down (last event is down and no up event follows)
+        current_downtime = None
+        if last_down:
+            try:
+                t_down = datetime.datetime.strptime(last_down['timestamp'], '%Y-%m-%d %H:%M:%S')
+                now = datetime.datetime.now()
+                duration = now - t_down
+                tot_sec = int(duration.total_seconds())
+                d_hours = tot_sec // 3600
+                d_mins = (tot_sec % 3600) // 60
+                duration_str = f"{d_hours}h {d_mins}m" if d_hours > 0 else f"{d_mins}m"
+                current_downtime = {
+                    'down_since': last_down['timestamp'],
+                    'duration': duration_str
+                }
+            except Exception:
+                current_downtime = {
+                    'down_since': last_down['timestamp'],
+                    'duration': 'Unknown'
+                }
+
+        # Return latest events first for UI display
+        downtime_periods.reverse()
+
+        return JsonResponse({
+            'device_uptime': formatted_uptime,
+            'device_status': device_status,
+            'downtimes': downtime_periods[:10], # recent 10 downtime events
+            'current_downtime': current_downtime
+        })
 
 
 def get_user_configured_role_ids(request):

@@ -530,4 +530,25 @@ class LibreNMSClient:
             logger.error(f"Failed to delete LibreNMS device {device_id_or_ip}: {str(e)}")
             return None
 
+    def get_device_eventlog(self, device_id_or_name):
+        """
+        Retrieves the event log for a device.
+        """
+        try:
+            res = self._request('GET', f"devices/{device_id_or_name}/eventlog")
+            if isinstance(res, dict) and res.get('status') == 'ok':
+                return res.get('logs') or res.get('eventlog') or []
+        except Exception as e:
+            logger.error(f"Failed to retrieve LibreNMS eventlog for device {device_id_or_name}: {str(e)}")
+        
+        # Fallback to global eventlog query parameter
+        try:
+            res = self._request('GET', 'eventlog', params={'device_id': device_id_or_name})
+            if isinstance(res, dict) and res.get('status') == 'ok':
+                return res.get('logs') or res.get('eventlog') or []
+        except Exception:
+            pass
+        return []
+
+
 

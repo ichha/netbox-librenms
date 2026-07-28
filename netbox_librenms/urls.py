@@ -12,4 +12,5 @@ urlpatterns = [
     path('devices/<int:pk>/librenms-interfaces/', views.DeviceLibreNMSInterfacesView.as_view(), name='device_librenms-interfaces'),
     path('devices/<int:pk>/librenms-neighbors/', views.DeviceLibreNMSNeighborsView.as_view(), name='device_librenms-neighbors'),
     path('interfaces/<int:pk>/librenms-graph/', views.InterfaceLibreNMSGraphView.as_view(), name='interface_librenms-graph'),
+    path('interfaces/<int:pk>/librenms-uptime-status/', views.InterfaceLibreNMSUptimeStatusView.as_view(), name='interface_librenms-uptime-status'),
 ]
