@@ -241,9 +241,9 @@
                 const x = e.clientX - rect.left;
                 const relX = x / rect.width;
                 
-                // RRDTool graph area is precisely between X = 10.0% and X = 94.2%
-                const graphStart = 0.100;
-                const graphEnd = 0.942;
+                // RRDTool graph area is precisely between X = 9.5% and X = 97.5%
+                const graphStart = 0.095;
+                const graphEnd = 0.975;
                 
                 if (relX >= graphStart && relX <= graphEnd) {
                     const lineX = x + imgEl.offsetLeft;
