@@ -20,12 +20,12 @@ class LibreNMSClient:
     def is_configured(self):
         return bool(self.base_url and self.api_token)
 
-    def _request(self, method, endpoint, params=None, stream=False, json_data=None):
+    def _request(self, method, endpoint, params=None, stream=False, json_data=None, ignore_circuit_breaker=False):
         if not self.is_configured():
             raise ValueError("LibreNMS plugin is not configured in PLUGINS_CONFIG.")
         
         # Simple circuit breaker check
-        if cache.get("librenms_circuit_broken"):
+        if not ignore_circuit_breaker and cache.get("librenms_circuit_broken"):
             raise requests.exceptions.ConnectionError("LibreNMS connection is temporarily suspended (circuit breaker active).")
 
         url = f"{self.base_url}/api/v0/{endpoint.lstrip('/')}"
@@ -54,7 +54,7 @@ class LibreNMSClient:
                 logger.error(f"LibreNMS API Error for {url}: {str(e)}")
                 
                 # If it's a connection error or timeout, trigger circuit breaker
-                if status_code is None or status_code >= 500:
+                if not ignore_circuit_breaker and (status_code is None or status_code >= 500):
                     logger.warning("LibreNMS connection error/timeout. Activating circuit breaker for 30 seconds.")
                     cache.set("librenms_circuit_broken", True, 30)
             
@@ -535,7 +535,7 @@ class LibreNMSClient:
         Retrieves the event log for a device.
         """
         try:
-            res = self._request('GET', f"devices/{device_id_or_name}/eventlog")
+            res = self._request('GET', f"devices/{device_id_or_name}/eventlog", ignore_circuit_breaker=True)
             if isinstance(res, dict) and res.get('status') == 'ok':
                 return res.get('logs') or res.get('eventlog') or []
         except Exception as e:
@@ -543,7 +543,7 @@ class LibreNMSClient:
         
         # Fallback to global eventlog query parameter
         try:
-            res = self._request('GET', 'eventlog', params={'device_id': device_id_or_name})
+            res = self._request('GET', 'eventlog', params={'device_id': device_id_or_name}, ignore_circuit_breaker=True)
             if isinstance(res, dict) and res.get('status') == 'ok':
                 return res.get('logs') or res.get('eventlog') or []
         except Exception:

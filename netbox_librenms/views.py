@@ -1382,17 +1382,38 @@ class InterfaceLibreNMSUptimeStatusView(View):
         # Fetch event log
         event_logs = client.get_device_eventlog(device_id)
         
-        # Resolve target port to match messages
-        ports = client.get_device_ports(device_id)
-        target_port = match_interface_to_port(interface.name, ports)
+        # Build local port name abbreviation matches
+        nb_name = interface.name.lower().strip()
+        port_names = [nb_name]
         
-        port_names = [interface.name.lower().strip()]
-        if target_port:
-            for k in ['ifName', 'ifname', 'port_name_raw', 'port_name', 'ifDescr', 'ifdescr']:
-                v = target_port.get(k)
-                if v:
-                    port_names.append(str(v).lower().strip())
+        # Add basic space-separated variation
+        # e.g., 'gigabitethernet0/2/1' -> 'gigabitethernet 0/2/1'
+        import re
+        match = re.match(r'^([a-zA-Z\-]+)([\d/:\.]+)$', nb_name)
+        if match:
+            prefix, suffix = match.groups()
+            port_names.append(f"{prefix} {suffix}")
         
+        # Add standard short abbreviation variations
+        abbrevs = {
+            'gigabitethernet': 'gi',
+            'fiftygigabitethernet': 'fi',
+            'tengigabitethernet': 'te',
+            'fortygigabitethernet': 'fo',
+            'loopback': 'lo',
+            'vlan': 'vl',
+            'port-channel': 'po',
+            'bundle-ether': 'be',
+        }
+        for full, short in abbrevs.items():
+            if nb_name.startswith(full):
+                short_name = nb_name.replace(full, short, 1)
+                port_names.append(short_name)
+                # e.g., 'gi 0/2/1'
+                if match:
+                    port_names.append(f"{short} {suffix}")
+                break
+
         # Filter event logs for this interface
         interface_events = []
         for log in event_logs:
@@ -1402,9 +1423,6 @@ class InterfaceLibreNMSUptimeStatusView(View):
                 if p_name in msg:
                     matched_port = True
                     break
-            
-            if target_port and str(target_port.get('port_id')) in msg:
-                matched_port = True
                 
             if not matched_port:
                 continue
