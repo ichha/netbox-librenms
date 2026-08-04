@@ -20,12 +20,12 @@ class LibreNMSClient:
     def is_configured(self):
         return bool(self.base_url and self.api_token)
 
-    def _request(self, method, endpoint, params=None, stream=False, json_data=None):
+    def _request(self, method, endpoint, params=None, stream=False, json_data=None, ignore_circuit_breaker=False):
         if not self.is_configured():
             raise ValueError("LibreNMS plugin is not configured in PLUGINS_CONFIG.")
         
         # Simple circuit breaker check
-        if cache.get("librenms_circuit_broken"):
+        if not ignore_circuit_breaker and cache.get("librenms_circuit_broken"):
             raise requests.exceptions.ConnectionError("LibreNMS connection is temporarily suspended (circuit breaker active).")
 
         url = f"{self.base_url}/api/v0/{endpoint.lstrip('/')}"
@@ -37,7 +37,7 @@ class LibreNMSClient:
                 params=params,
                 json=json_data,
                 verify=self.verify_ssl,
-                timeout=15 if method in ['POST', 'PATCH', 'PUT'] else 5,
+                timeout=15 if method in ['POST', 'PATCH', 'PUT'] else 10,
                 stream=stream
             )
             response.raise_for_status()
@@ -268,9 +268,9 @@ class LibreNMSClient:
             logger.warning(f"Failed to parse rate string '{rate_str}': {str(e)}")
             return 0.0
 
-    def get_port_statistics(self, device_id, port_name):
+    def get_port_statistics(self, device_id, port_name, ignore_circuit_breaker=False):
         columns = "port_id,ifSpeed,ifName,ifDescr,ifAlias,ifInOctets_rate,ifOutOctets_rate"
-        res = self._request('GET', f"devices/{device_id}/ports", params={'columns': columns})
+        res = self._request('GET', f"devices/{device_id}/ports", params={'columns': columns}, ignore_circuit_breaker=ignore_circuit_breaker)
         ports = res.get("ports", []) if isinstance(res, dict) else []
         
         matched_port = None
@@ -339,7 +339,7 @@ class LibreNMSClient:
             "ifSpeed": matched_port.get("ifSpeed")
         }
 
-    def get_port_graph_image(self, device_id, port_name, time_range, double_encode=False, width=1100, height=300):
+    def get_port_graph_image(self, device_id, port_name, time_range, double_encode=False, width=1100, height=300, ignore_circuit_breaker=False):
         range_map = {
             "1d": "-1d",
             "2d": "-2d",
@@ -365,7 +365,7 @@ class LibreNMSClient:
             'graph_stacked': '1',
         }
         
-        return self._request('GET', endpoint, params=params, stream=True)
+        return self._request('GET', endpoint, params=params, stream=True, ignore_circuit_breaker=ignore_circuit_breaker)
 
     def add_device_v2(self, ip, community):
         """

@@ -115,7 +115,7 @@ class LibreNMSTrafficDataView(APIView):
 
         if wants_json:
             try:
-                stats = client.get_port_statistics(device_id, interface_name)
+                stats = client.get_port_statistics(device_id, interface_name, ignore_circuit_breaker=True)
                 if not stats:
                     stats = {
                         "in_bps": 0.0,
@@ -148,7 +148,8 @@ class LibreNMSTrafficDataView(APIView):
                 time_range=time_range,
                 double_encode=False,
                 width=width,
-                height=height
+                height=height,
+                ignore_circuit_breaker=True
             )
             
             content_type = response.headers.get("Content-Type", "").lower()
@@ -164,7 +165,8 @@ class LibreNMSTrafficDataView(APIView):
                     time_range=time_range,
                     double_encode=True,
                     width=width,
-                    height=height
+                    height=height,
+                    ignore_circuit_breaker=True
                 )
                 
                 content_type = response.headers.get("Content-Type", "").lower()

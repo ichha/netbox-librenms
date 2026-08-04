@@ -1281,7 +1281,7 @@ class InterfaceLibreNMSGraphView(View):
             Requests the endpoint, validates that it returned a valid image,
             and returns the content and content-type. Raises ValueError on non-image response.
             """
-            response = client._request('GET', endpoint, params=params, stream=True)
+            response = client._request('GET', endpoint, params=params, stream=True, ignore_circuit_breaker=True)
             content_type = response.headers.get("content-type", "").lower()
             
             # If the response is JSON or not an image, it indicates an error or incorrect format
