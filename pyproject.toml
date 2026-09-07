@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A NetBox plugin to integrate LibreNMS monitoring data, interfaces, and LLDP neighbors."
 readme = "README.md"
 authors = [
-    { name = "Antigravity", email = "antigravity@example.com" }
+    { name = "Nepal Telecom", email = "info@ntc.net.np" }
 ]
 license = { text = "Apache-2.0" }
 classifiers = [

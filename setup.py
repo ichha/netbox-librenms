@@ -6,8 +6,8 @@ setup(
     description='A NetBox plugin to integrate LibreNMS monitoring data, interfaces, and LLDP neighbors.',
     long_description='A NetBox plugin to retrieve and display live monitoring status, interface details (IP, VLAN), and LLDP neighbor connections from LibreNMS.',
     url='https://github.com/ichha/netbox-librenms',
-    author='Antigravity',
-    author_email='antigravity@example.com',
+    author='Nepal Telecom',
+    author_email='info@ntc.net.np',
     license='Apache-2.0',
     install_requires=[
         'requests',

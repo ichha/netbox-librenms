@@ -9,8 +9,8 @@ class NetBoxLibreNMSConfig(PluginConfig):
     verbose_name = 'LibreNMS Integration'
     description = 'Integrates LibreNMS device status, alerts, interfaces, and LLDP neighbors into NetBox Device views.'
     version = '0.1.0'
-    author = 'Antigravity'
-    author_email = 'antigravity@example.com'
+    author = 'Nepal Telecom'
+    author_email = 'info@ntc.net.np'
     base_url = 'librenms'
     required_settings = ['libre_nms_url', 'libre_nms_api_token']
     default_settings = {
