@@ -157,7 +157,7 @@
             {% if server_info %}
               {% for key, val in server_info.items %}
                 <tr>
-                  <th class="bg-light text-capitalize">{{ key|replace:"_, " }}</th>
+                  <th class="bg-light text-capitalize">{{ key }}</th>
                   <td><code>{{ val }}</code></td>
                 </tr>
               {% endfor %}

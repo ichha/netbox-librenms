@@ -1433,7 +1433,12 @@ class ServerStatusView(View):
                 try:
                     system_res = client._request('GET', 'system')
                     if isinstance(system_res, dict):
-                        server_info = system_res.get('system', {}) or system_res
+                        raw_info = system_res.get('system', {}) or system_res
+                        if isinstance(raw_info, dict):
+                            for k, v in raw_info.items():
+                                if k not in ['status', 'message']:
+                                    label = str(k).replace('_', ' ').title()
+                                    server_info[label] = v
                 except Exception:
                     pass
 
