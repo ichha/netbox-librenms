@@ -30,45 +30,59 @@
   {% endif %}
 
   <!-- Summary Cards -->
-  <div class="row mb-4">
-    <div class="col-md-4">
+  <div class="row mb-4 g-3">
+    <div class="col-md-3">
       <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}{% if selected_role_id %}?role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if not status_filter %}border border-primary border-2{% else %}border-0{% endif %}" title="Click to view all devices">
         <div class="card-body d-flex align-items-center">
           <div class="avatar bg-primary text-white p-3 rounded-circle me-3">
             <i class="mdi mdi-server fs-2"></i>
           </div>
           <div>
-            <div class="fs-6 text-muted text-uppercase fw-semibold">Total Devices</div>
+            <div class="fs-7 text-muted text-uppercase fw-semibold">Total Devices</div>
             <div class="fs-2 fw-bold text-primary">{{ total_devices }}</div>
             <div class="fs-7 text-muted">{% if selected_role %}Role: {{ selected_role.name }}{% elif configured_roles %}Across {{ configured_roles|length }} configured roles{% else %}All NetBox devices{% endif %}</div>
           </div>
         </div>
       </a>
     </div>
-    <div class="col-md-4">
-      <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?status=synced{% if selected_role_id %}&role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if status_filter == 'synced' %}border border-success border-2{% else %}border-0{% endif %}" title="Click to view synced devices">
+    <div class="col-md-3">
+      <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?status=synced{% if selected_role_id %}&role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if status_filter == 'synced' %}border border-success border-2{% else %}border-0{% endif %}" title="Click to view synced & grouped devices">
         <div class="card-body d-flex align-items-center">
           <div class="avatar bg-success text-white p-3 rounded-circle me-3">
             <i class="mdi mdi-check-circle fs-2"></i>
           </div>
           <div>
-            <div class="fs-6 text-muted text-uppercase fw-semibold">Synced Devices</div>
+            <div class="fs-7 text-muted text-uppercase fw-semibold">Synced & Grouped</div>
             <div class="fs-2 fw-bold text-success">{{ synced_devices }}</div>
-            <div class="fs-7 text-muted">Found in LibreNMS (Click to filter)</div>
+            <div class="fs-7 text-muted">In LibreNMS & role group matched</div>
           </div>
         </div>
       </a>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
+      <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?status=mismatch{% if selected_role_id %}&role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if status_filter == 'mismatch' %}border border-warning border-2{% else %}border-0{% endif %}" title="Click to view devices with role/group mismatch">
+        <div class="card-body d-flex align-items-center">
+          <div class="avatar bg-warning text-dark p-3 rounded-circle me-3">
+            <i class="mdi mdi-alert-circle-outline fs-2"></i>
+          </div>
+          <div>
+            <div class="fs-7 text-muted text-uppercase fw-semibold">Role/Group Mismatch</div>
+            <div class="fs-2 fw-bold text-warning">{{ mismatch_devices }}</div>
+            <div class="fs-7 text-muted">In LibreNMS, group needs fix</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-3">
       <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}?status=pending{% if selected_role_id %}&role_id={{ selected_role_id }}{% endif %}" class="card card-sm bg-body-tertiary text-decoration-none shadow-sm {% if status_filter == 'pending' %}border border-danger border-2{% else %}border-0{% endif %}" title="Click to view devices pending sync">
         <div class="card-body d-flex align-items-center">
           <div class="avatar bg-danger text-white p-3 rounded-circle me-3">
             <i class="mdi mdi-sync-alert fs-2"></i>
           </div>
           <div>
-            <div class="fs-6 text-muted text-uppercase fw-semibold">Devices to be Synced</div>
+            <div class="fs-7 text-muted text-uppercase fw-semibold">Pending Sync</div>
             <div class="fs-2 fw-bold text-danger">{{ devices_to_sync }}</div>
-            <div class="fs-7 text-muted">Pending push (Click to filter)</div>
+            <div class="fs-7 text-muted">Not in LibreNMS yet</div>
           </div>
         </div>
       </a>
@@ -126,7 +140,7 @@
             <th>SNMP Protocol</th>
             <th>SNMP Parameters</th>
             <th>Sync Status</th>
-            <th>LibreNMS Hostname</th>
+            <th>LibreNMS Details</th>
             <th class="text-end">Actions</th>
           </tr>
         </thead>
@@ -167,9 +181,13 @@
                 {% endif %}
               </td>
               <td>
-                {% if row.is_synced %}
-                  <span class="badge bg-success text-white fw-bold" style="font-size: 0.82rem; padding: 6px 10px;">
-                    <i class="mdi mdi-check-circle me-1"></i> Synced
+                {% if row.status_code == 'synced' %}
+                  <span class="badge bg-success text-white fw-bold" style="font-size: 0.82rem; padding: 6px 10px;" title="Present in LibreNMS & role group matched">
+                    <i class="mdi mdi-check-circle me-1"></i> Synced & Grouped
+                  </span>
+                {% elif row.status_code == 'mismatch' %}
+                  <span class="badge bg-warning text-dark fw-bold" style="font-size: 0.82rem; padding: 6px 10px;" title="Device exists in LibreNMS, but group/purpose field differs: '{{ row.lnms_purpose }}'">
+                    <i class="mdi mdi-alert-circle-outline me-1"></i> Role Mismatch
                   </span>
                 {% else %}
                   <span class="badge bg-danger text-white fw-bold" style="font-size: 0.82rem; padding: 6px 10px;">
@@ -178,24 +196,35 @@
                 {% endif %}
               </td>
               <td>
-                {% if row.lnms_device %}
-                  <span class="text-success fw-bold"><i class="mdi mdi-server-network me-1"></i> {{ row.lnms_device.hostname }}</span>
+                {% if row.is_in_librenms %}
+                  <span class="text-success fw-bold d-block"><i class="mdi mdi-server-network me-1"></i> {{ row.lnms_hostname }}</span>
+                  {% if row.lnms_purpose %}
+                    <small class="d-block text-muted fs-7 font-monospace">Purpose: {{ row.lnms_purpose }}</small>
+                  {% else %}
+                    <small class="d-block text-warning fs-7 font-monospace"><i class="mdi mdi-information-outline"></i> No purpose group set</small>
+                  {% endif %}
                 {% else %}
                   <span class="text-muted">Not in LibreNMS</span>
                 {% endif %}
               </td>
               <td class="text-end">
-                {% if row.is_synced %}
-                  <span class="btn btn-sm btn-outline-success disabled fw-bold" style="font-size: 0.82rem;"><i class="mdi mdi-check"></i> Synced</span>
-                {% else %}
-                  <form action="{% url 'plugins:netbox_librenms:sync_devices' %}" method="post" class="d-inline">
-                    {% csrf_token %}
-                    <input type="hidden" name="device_id" value="{{ row.id }}" />
+                <form action="{% url 'plugins:netbox_librenms:sync_devices' %}" method="post" class="d-inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="device_id" value="{{ row.id }}" />
+                  {% if row.status_code == 'mismatch' %}
+                    <button type="submit" class="btn btn-sm btn-warning text-dark fw-bold px-3" style="font-size: 0.82rem;" title="Update device purpose and fix LibreNMS group membership">
+                      <i class="mdi mdi-wrench me-1"></i> Fix Group & Sync
+                    </button>
+                  {% elif row.status_code == 'synced' %}
+                    <button type="submit" class="btn btn-sm btn-outline-primary fw-bold px-3" style="font-size: 0.82rem;" title="Re-sync device details and group to LibreNMS">
+                      <i class="mdi mdi-refresh me-1"></i> Re-Sync
+                    </button>
+                  {% else %}
                     <button type="submit" class="btn btn-sm btn-primary text-white fw-bold px-3" style="font-size: 0.82rem;" title="Push this device to LibreNMS">
                       <i class="mdi mdi-cloud-upload me-1"></i> Sync Device
                     </button>
-                  </form>
-                {% endif %}
+                  {% endif %}
+                </form>
               </td>
             </tr>
           {% empty %}

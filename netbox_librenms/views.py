@@ -1397,6 +1397,64 @@ class RoleSettingsView(View):
         return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
 
+class ServerStatusView(View):
+    def get(self, request):
+        import time
+        client = LibreNMSClient()
+        librenms_configured = client.is_configured()
+
+        start_time = time.time()
+        api_connected = False
+        latency_ms = None
+        server_info = {}
+        total_lnms_devices = 0
+        total_alerts = 0
+        error_msg = ""
+
+        if librenms_configured:
+            try:
+                res = client._request('GET', 'devices')
+                latency_ms = round((time.time() - start_time) * 1000, 1)
+                if isinstance(res, dict) and res.get('status') == 'ok':
+                    api_connected = True
+                    devices_list = res.get('devices', [])
+                    total_lnms_devices = len(devices_list)
+            except Exception as e:
+                error_msg = str(e)
+
+            if api_connected:
+                try:
+                    alerts_res = client._request('GET', 'alerts')
+                    if isinstance(alerts_res, dict) and alerts_res.get('status') == 'ok':
+                        total_alerts = len(alerts_res.get('alerts', []))
+                except Exception:
+                    pass
+
+                try:
+                    system_res = client._request('GET', 'system')
+                    if isinstance(system_res, dict):
+                        server_info = system_res.get('system', {}) or system_res
+                except Exception:
+                    pass
+
+        netbox_devices_count = Device.objects.count()
+        configured_role_ids = get_user_configured_role_ids(request)
+
+        context = {
+            'librenms_configured': librenms_configured,
+            'api_connected': api_connected,
+            'latency_ms': latency_ms,
+            'base_url': client.base_url,
+            'error_msg': error_msg,
+            'total_lnms_devices': total_lnms_devices,
+            'total_alerts': total_alerts,
+            'server_info': server_info,
+            'netbox_devices_count': netbox_devices_count,
+            'configured_roles_count': len(configured_role_ids),
+        }
+        return render(request, 'netbox_librenms/server_status.html', context)
+
+
 class DeviceSyncStatusView(View):
     def get(self, request):
         client = LibreNMSClient()
@@ -1418,7 +1476,7 @@ class DeviceSyncStatusView(View):
             # Default to configured roles if configured, unless user selected all or specific role
             netbox_devices = netbox_devices.filter(role_id__in=configured_role_ids)
 
-        status_filter = request.GET.get('status') # 'synced', 'pending', or None
+        status_filter = request.GET.get('status') # 'synced', 'mismatch', 'pending', or None
 
         lnms_map = {}
         if librenms_configured:
@@ -1429,6 +1487,7 @@ class DeviceSyncStatusView(View):
 
         all_device_rows = []
         synced_count = 0
+        mismatch_count = 0
 
         for dev in netbox_devices:
             ip = ""
@@ -1467,37 +1526,60 @@ class DeviceSyncStatusView(View):
             name_clean = str(dev.name or "").strip().lower()
             matched_lnms_dev = (lnms_map.get(ip_clean) if ip_clean else None) or (lnms_map.get(name_clean) if name_clean else None)
 
-            is_synced = bool(matched_lnms_dev)
-            if is_synced:
-                synced_count += 1
-                status_label = "Synced"
-                status_class = "success"
+            role_name = dev.role.name if dev.role else ""
+            lnms_purpose = str(matched_lnms_dev.get('purpose') or "").strip() if matched_lnms_dev else ""
+            lnms_hostname = str(matched_lnms_dev.get('hostname') or "").strip() if matched_lnms_dev else ""
+
+            is_in_librenms = bool(matched_lnms_dev)
+            group_matched = True
+            if is_in_librenms and role_name:
+                group_matched = role_name.lower() in lnms_purpose.lower()
+
+            if is_in_librenms:
+                if group_matched:
+                    status_label = "Synced"
+                    status_class = "success"
+                    status_code = "synced"
+                    synced_count += 1
+                else:
+                    status_label = "Role Mismatch"
+                    status_class = "warning"
+                    status_code = "mismatch"
+                    mismatch_count += 1
             else:
                 status_label = "Pending Sync"
-                status_class = "warning" if snmp_type != "None" else "danger"
+                status_class = "danger" if snmp_type == "None" else "warning"
+                status_code = "pending"
 
             all_device_rows.append({
                 'device': dev,
                 'id': dev.id,
                 'name': dev.name,
                 'ip': ip,
-                'role_name': dev.role.name if dev.role else "",
+                'role_name': role_name,
                 'snmp_type': snmp_type,
                 'snmp_params_list': snmp_params_list,
-                'is_synced': is_synced,
+                'is_synced': is_in_librenms and group_matched,
+                'is_in_librenms': is_in_librenms,
+                'group_matched': group_matched,
+                'lnms_purpose': lnms_purpose,
+                'lnms_hostname': lnms_hostname,
                 'status_label': status_label,
                 'status_class': status_class,
+                'status_code': status_code,
                 'lnms_device': matched_lnms_dev
             })
 
         total_devices = len(all_device_rows)
-        pending_count = total_devices - synced_count
+        pending_count = total_devices - (synced_count + mismatch_count)
 
         # Filter rows by status if status_filter param present
         if status_filter == 'synced':
-            filtered_rows = [r for r in all_device_rows if r['is_synced']]
+            filtered_rows = [r for r in all_device_rows if r['status_code'] == 'synced']
+        elif status_filter == 'mismatch':
+            filtered_rows = [r for r in all_device_rows if r['status_code'] == 'mismatch']
         elif status_filter == 'pending':
-            filtered_rows = [r for r in all_device_rows if not r['is_synced']]
+            filtered_rows = [r for r in all_device_rows if r['status_code'] == 'pending']
         else:
             filtered_rows = all_device_rows
 
@@ -1529,6 +1611,7 @@ class DeviceSyncStatusView(View):
             'per_page': per_page,
             'total_devices': total_devices,
             'synced_devices': synced_count,
+            'mismatch_devices': mismatch_count,
             'devices_to_sync': pending_count,
             'librenms_configured': librenms_configured,
         }
@@ -1564,6 +1647,7 @@ class SyncDevicesActionView(View):
             return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
 
         created = 0
+        updated = 0
         skipped = 0
         failed = 0
         failed_reasons = []
@@ -1580,18 +1664,9 @@ class SyncDevicesActionView(View):
                 skipped += 1
                 continue
 
-            if lnms_map.get(ip.lower()) or lnms_map.get(str(name).lower()):
-                role_name = dev.role.name if dev.role else ""
-                if role_name:
-                    try:
-                        client.update_device_purpose(ip, role_name)
-                    except Exception:
-                        pass
-                skipped += 1
-                continue
-
             role_name = dev.role.name if dev.role else ""
 
+            # Ensure dynamic device group exists in LibreNMS
             if role_name and role_name not in group_names:
                 try:
                     client.create_device_group(role_name)
@@ -1599,6 +1674,26 @@ class SyncDevicesActionView(View):
                 except Exception:
                     pass
 
+            ip_clean = ip.strip().lower()
+            name_clean = str(name or "").strip().lower()
+            matched_lnms_dev = lnms_map.get(ip_clean) or lnms_map.get(name_clean)
+
+            if matched_lnms_dev:
+                # Device already in LibreNMS -> force update its purpose field to role_name so dynamic device group picks it up!
+                if role_name:
+                    try:
+                        client.update_device_purpose(ip, role_name)
+                    except Exception:
+                        pass
+                    try:
+                        lnms_id = matched_lnms_dev.get('device_id') or matched_lnms_dev.get('hostname') or ip
+                        client.update_device_purpose(lnms_id, role_name)
+                    except Exception:
+                        pass
+                updated += 1
+                continue
+
+            # If device does not exist in LibreNMS, add it
             cf = dev.custom_field_data or {}
             community = cf.get("snmp_community")
 
@@ -1630,16 +1725,17 @@ class SyncDevicesActionView(View):
             else:
                 failed += 1
 
-        msg = f"Device sync finished: {created} added to LibreNMS, {skipped} skipped (already present/no IP), {failed} failed."
+        msg = f"Device sync finished: {created} added to LibreNMS, {updated} updated role purpose/group, {skipped} skipped (no IP), {failed} failed."
         if failed_reasons:
             msg += f" Details: {'; '.join(failed_reasons[:3])}"
-        
-        if created > 0 or skipped > 0:
+
+        if created > 0 or updated > 0:
             messages.success(request, msg)
         else:
             messages.warning(request, msg)
 
         return HttpResponseRedirect(reverse('plugins:netbox_librenms:device_sync_status'))
+
 
 
 

@@ -1,0 +1,181 @@
+{% extends 'base/layout.html' %}
+{% load helpers %}
+
+{% block title %}LibreNMS Server Status{% endblock %}
+
+{% block controls %}
+  <div class="controls">
+    <a href="{% url 'plugins:netbox_librenms:device_sync_status' %}" class="btn btn-primary me-2">
+      <i class="mdi mdi-sync"></i> Device Sync Status
+    </a>
+    <a href="{% url 'plugins:netbox_librenms:role_settings' %}" class="btn btn-secondary">
+      <i class="mdi mdi-cog"></i> Configure Synced Roles
+    </a>
+  </div>
+{% endblock controls %}
+
+{% block content %}
+  {% if not librenms_configured %}
+    <div class="alert alert-warning" role="alert">
+      <h4 class="alert-heading"><i class="mdi mdi-alert"></i> LibreNMS Plugin Not Configured</h4>
+      <p class="mb-0">
+        Please configure <code>libre_nms_url</code> and <code>libre_nms_api_token</code> in your NetBox <code>PLUGINS_CONFIG</code> settings.
+      </p>
+    </div>
+  {% else %}
+    <!-- Server Connection Header Card -->
+    <div class="card mb-4 border-0 shadow-sm">
+      <div class="card-body d-flex align-items-center justify-content-between flex-wrap gap-3">
+        <div class="d-flex align-items-center">
+          <div class="avatar p-3 rounded-circle me-3 {% if api_connected %}bg-success text-white{% else %}bg-danger text-white{% endif %}">
+            <i class="mdi {% if api_connected %}mdi-server-network{% else %}mdi-server-network-off{% endif %} fs-1"></i>
+          </div>
+          <div>
+            <h3 class="card-title mb-1 fw-bold">
+              LibreNMS Monitoring Server Status
+            </h3>
+            <div class="text-muted fs-6">
+              Connected API Endpoint: <code class="fw-bold">{{ base_url }}</code>
+            </div>
+          </div>
+        </div>
+        <div>
+          {% if api_connected %}
+            <span class="badge bg-success fs-6 px-3 py-2 fw-bold">
+              <i class="mdi mdi-check-circle me-1"></i> Connected & Online
+            </span>
+            {% if latency_ms %}
+              <span class="badge bg-info text-dark fs-6 px-3 py-2 ms-2 fw-bold">
+                <i class="mdi mdi-speedometer me-1"></i> Latency: {{ latency_ms }} ms
+              </span>
+            {% endif %}
+          {% else %}
+            <span class="badge bg-danger fs-6 px-3 py-2 fw-bold">
+              <i class="mdi mdi-close-circle me-1"></i> Connection Offline / Error
+            </span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if error_msg %}
+      <div class="alert alert-danger mb-4" role="alert">
+        <h5 class="alert-heading fw-bold"><i class="mdi mdi-alert-circle"></i> LibreNMS API Error</h5>
+        <p class="mb-0 font-monospace">{{ error_msg }}</p>
+      </div>
+    {% endif %}
+
+    <!-- Status Metric Cards -->
+    <div class="row mb-4 g-3">
+      <!-- Total Monitored Devices in LibreNMS -->
+      <div class="col-md-3">
+        <div class="card card-sm bg-body-tertiary shadow-sm border-0 h-100">
+          <div class="card-body d-flex align-items-center">
+            <div class="avatar bg-primary text-white p-3 rounded-circle me-3">
+              <i class="mdi mdi-router-network fs-2"></i>
+            </div>
+            <div>
+              <div class="fs-7 text-muted text-uppercase fw-semibold">LibreNMS Devices</div>
+              <div class="fs-2 fw-bold text-primary">{{ total_lnms_devices }}</div>
+              <div class="fs-7 text-muted">Monitored in LibreNMS</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NetBox Total Devices -->
+      <div class="col-md-3">
+        <div class="card card-sm bg-body-tertiary shadow-sm border-0 h-100">
+          <div class="card-body d-flex align-items-center">
+            <div class="avatar bg-info text-white p-3 rounded-circle me-3">
+              <i class="mdi mdi-server fs-2"></i>
+            </div>
+            <div>
+              <div class="fs-7 text-muted text-uppercase fw-semibold">NetBox Devices</div>
+              <div class="fs-2 fw-bold text-info">{{ netbox_devices_count }}</div>
+              <div class="fs-7 text-muted">Total inventory devices</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active LibreNMS Alerts -->
+      <div class="col-md-3">
+        <div class="card card-sm bg-body-tertiary shadow-sm border-0 h-100">
+          <div class="card-body d-flex align-items-center">
+            <div class="avatar {% if total_alerts > 0 %}bg-warning text-dark{% else %}bg-success text-white{% endif %} p-3 rounded-circle me-3">
+              <i class="mdi mdi-bell-ring fs-2"></i>
+            </div>
+            <div>
+              <div class="fs-7 text-muted text-uppercase fw-semibold">Active Alerts</div>
+              <div class="fs-2 fw-bold {% if total_alerts > 0 %}text-warning{% else %}text-success{% endif %}">{{ total_alerts }}</div>
+              <div class="fs-7 text-muted">Unacknowledged alerts</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configured Role Sync -->
+      <div class="col-md-3">
+        <div class="card card-sm bg-body-tertiary shadow-sm border-0 h-100">
+          <div class="card-body d-flex align-items-center">
+            <div class="avatar bg-secondary text-white p-3 rounded-circle me-3">
+              <i class="mdi mdi-filter-check fs-2"></i>
+            </div>
+            <div>
+              <div class="fs-7 text-muted text-uppercase fw-semibold">Active Sync Roles</div>
+              <div class="fs-2 fw-bold text-secondary">{{ configured_roles_count }}</div>
+              <div class="fs-7 text-muted">Selected NetBox roles</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Server Details Table -->
+    <div class="card mb-4 shadow-sm">
+      <div class="card-header bg-light d-flex align-items-center">
+        <h5 class="card-title mb-0 fw-bold"><i class="mdi mdi-information-outline me-2"></i> LibreNMS Integration Details</h5>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <tbody>
+            <tr>
+              <th style="width: 250px;" class="bg-light">LibreNMS Web API URL</th>
+              <td><code>{{ base_url }}</code></td>
+            </tr>
+            <tr>
+              <th class="bg-light">API Health Check</th>
+              <td>
+                {% if api_connected %}
+                  <span class="text-success fw-bold"><i class="mdi mdi-check-circle me-1"></i> API responding (200 OK)</span>
+                {% else %}
+                  <span class="text-danger fw-bold"><i class="mdi mdi-close-circle me-1"></i> API connection failed</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% if server_info %}
+              {% for key, val in server_info.items %}
+                <tr>
+                  <th class="bg-light text-capitalize">{{ key|replace:"_, " }}</th>
+                  <td><code>{{ val }}</code></td>
+                </tr>
+              {% endfor %}
+            {% endif %}
+            <tr>
+              <th class="bg-light">Actions</th>
+              <td>
+                <a href="{% url 'plugins:netbox_librenms:server_status' %}" class="btn btn-sm btn-outline-primary me-2">
+                  <i class="mdi mdi-refresh"></i> Refresh Health Check
+                </a>
+                <a href="{{ base_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-success">
+                  <i class="mdi mdi-open-in-new"></i> Open LibreNMS Web Console
+                </a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+{% endblock content %}
