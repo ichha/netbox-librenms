@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.contrib import messages
 from django.urls import reverse
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, HttpResponseForbidden
 from django.shortcuts import render
 from django.views.generic import View
 from django.core.paginator import Paginator
@@ -1360,8 +1360,16 @@ def get_user_configured_role_ids(request):
     return []
 
 
+def is_admin_user(request):
+    if not hasattr(request, 'user') or not request.user.is_authenticated:
+        return False
+    return request.user.is_superuser or request.user.has_perm('extras.change_configcontext')
+
+
 class RoleSettingsView(View):
     def get(self, request):
+        if not is_admin_user(request):
+            return HttpResponseForbidden("Superuser or Admin permission required to access LibreNMS Plugin settings.")
         all_roles = DeviceRole.objects.all().order_by('name')
         selected_ids = get_user_configured_role_ids(request)
 
@@ -1383,6 +1391,8 @@ class RoleSettingsView(View):
         return render(request, 'netbox_librenms/role_settings.html', context)
 
     def post(self, request):
+        if not is_admin_user(request):
+            return HttpResponseForbidden("Superuser or Admin permission required to access LibreNMS Plugin settings.")
         raw_ids = request.POST.getlist('device_roles')
         selected_ids = [int(x) for x in raw_ids if str(x).isdigit()]
 
@@ -1399,6 +1409,8 @@ class RoleSettingsView(View):
 
 class ServerStatusView(View):
     def get(self, request):
+        if not is_admin_user(request):
+            return HttpResponseForbidden("Superuser or Admin permission required to access LibreNMS Plugin settings.")
         import time
         client = LibreNMSClient()
         librenms_configured = client.is_configured()
@@ -1462,6 +1474,8 @@ class ServerStatusView(View):
 
 class DeviceSyncStatusView(View):
     def get(self, request):
+        if not is_admin_user(request):
+            return HttpResponseForbidden("Superuser or Admin permission required to access LibreNMS Plugin settings.")
         client = LibreNMSClient()
         librenms_configured = client.is_configured()
 
@@ -1625,6 +1639,8 @@ class DeviceSyncStatusView(View):
 
 class SyncDevicesActionView(View):
     def post(self, request):
+        if not is_admin_user(request):
+            return HttpResponseForbidden("Superuser or Admin permission required to access LibreNMS Plugin settings.")
         client = LibreNMSClient()
         if not client.is_configured():
             messages.error(request, "LibreNMS integration settings are missing.")
