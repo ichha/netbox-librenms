@@ -8,19 +8,19 @@ menu = PluginMenu(
             PluginMenuItem(
                 link='plugins:netbox_librenms:server_status',
                 link_text='Server Status',
-                permissions=['dcim.view_device']
+                permissions=[]
             ),
         ),),
         ('SYNCHRONIZATION', (
             PluginMenuItem(
                 link='plugins:netbox_librenms:device_sync_status',
                 link_text='Device Sync Status',
-                permissions=['dcim.view_device']
+                permissions=[]
             ),
             PluginMenuItem(
                 link='plugins:netbox_librenms:role_settings',
                 link_text='Device Role Settings',
-                permissions=['dcim.view_devicerole']
+                permissions=[]
             ),
         ),),
     ),
